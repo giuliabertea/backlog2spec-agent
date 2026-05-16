@@ -42,7 +42,25 @@
       "Skill(opsx:propose)",
       "Skill(opsx:propose:*)",
       "Bash(Test-Path \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\openspec\\\\specs\\\\copilot-optimised-spec-format\\\\spec.md\")",
-      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\" -Recurse -Force)"
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\" -Recurse -Force)",
+      "Read(//c/Users/gbert/.nuget/packages/azure.ai.projects/**)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.projects\\\\1.0.0-beta.9\\\\lib\\\\net8.0\\\\Azure.AI.Projects.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Select-Object -First 50 -ExpandProperty name)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.projects\\\\1.0.0-beta.9\\\\lib\\\\net8.0\\\\Azure.AI.Projects.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"Agent\" } | Select-Object -First 50 -ExpandProperty name)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.projects\\\\1.0.0-beta.9\\\\lib\\\\net8.0\\\\Azure.AI.Projects.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"Thread|Run|Message\" -and $_.name -notmatch \"Parameter|Result|Sampl|Redact\" } | Select-Object -First 60 -ExpandProperty name)",
+      "PowerShell(Invoke-WebRequest \"https://api.nuget.org/v3/index.json\" -UseBasicParsing -TimeoutSec 10)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.projects.agents\\\\2.1.0-beta.2\\\\lib\\\\net8.0\\\\Azure.AI.Projects.Agents.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"Session|Run|Thread|Invoke\" } | Select-Object -First 40 -ExpandProperty name)",
+      "PowerShell(dotnet package search \"Azure.AI.OpenAI.Assistants\" --prerelease 2>&1)",
+      "PowerShell(dotnet package search \"OpenAI Assistants\" --prerelease 2>&1)",
+      "PowerShell(dotnet package search \"Azure.AI.Projects\" --prerelease --exact-match 2>&1)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"^T:\" } | Select-Object -First 40 -ExpandProperty name)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"AssistantsClient\\\\.\\(Create|Get|Delete\\)\" } | Select-Object -First 30 -ExpandProperty name)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"CreateMessage|CreateRun|GetRun\\\\b|GetAssistant\\\\b\" } | Select-Object -ExpandProperty name)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"GetRunAsync|ThreadRun\\\\.|RunStatus|AssistantsClient\\\\.#ctor|MessageRole|GetAssistantAsync\" } | Select-Object -ExpandProperty name)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"MessageTextContent\\\\.|PageableList\" } | Select-Object -ExpandProperty name | Select-Object -First 30)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"InternalMessageTextDetails|MessageContent\\\\b\" } | Select-Object -ExpandProperty name | Select-Object -First 20)",
+      "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"^P:Azure.AI.OpenAI.Assistants.ThreadMessage\\\\.\" } | Select-Object -ExpandProperty name)",
+      "Bash(Get-ChildItem -Recurse -Filter \"*.csproj\" \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\")",
+      "PowerShell(dotnet build \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\Backlog2SpecAgent.sln\")"
     ]
   }
 }

@@ -4,11 +4,11 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{97E2435E-C12A-40D2-83EB-840B51C8C64B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Backlog2SpecAgentAgent.Cli", "src\Backlog2SpecAgentAgent.Cli\Backlog2SpecAgentAgent.Cli.csproj", "{6349F0AB-D572-40A9-A322-3DF53787A5AC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Backlog2SpecAgent.Cli", "src\Backlog2SpecAgent.Cli\Backlog2SpecAgent.Cli.csproj", "{6349F0AB-D572-40A9-A322-3DF53787A5AC}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{4760025F-1009-4C10-8226-AB491C80D698}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Backlog2SpecAgentAgent.Tests", "tests\Backlog2SpecAgentAgent.Tests\Backlog2SpecAgentAgent.Tests.csproj", "{9D607E65-2C3F-4131-B0A6-08B28BFF4619}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Backlog2SpecAgent.Tests", "tests\Backlog2SpecAgent.Tests\Backlog2SpecAgent.Tests.csproj", "{9D607E65-2C3F-4131-B0A6-08B28BFF4619}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

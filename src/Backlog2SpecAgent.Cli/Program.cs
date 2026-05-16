@@ -3,6 +3,7 @@ using Backlog2SpecAgent.Cli.Ado;
 using Backlog2SpecAgent.Cli.Agents;
 using Backlog2SpecAgent.Cli.Commands;
 using Backlog2SpecAgent.Cli.Config;
+using Backlog2SpecAgent.Cli.Infrastructure.AI;
 using Backlog2SpecAgent.Cli.Kernel;
 using Backlog2SpecAgent.Cli.Output;
 using Microsoft.Extensions.Configuration;
@@ -46,19 +47,32 @@ var host = Host.CreateDefaultBuilder(args)
             var apiKey = config["AzureAI:ApiKey"] ?? throw new InvalidOperationException("AzureAI:ApiKey secret is missing.");
             var deploymentName = config["AzureAI:DeploymentName"] ?? throw new InvalidOperationException("AzureAI:DeploymentName secret is missing.");
             var pat = config["Ado:Pat"] ?? throw new InvalidOperationException("Ado:Pat secret is missing.");
+            var useAgent = config.GetValue<bool>("AzureAI:UseAgent");
 
             var endpointType = ParseEndpointType(config["AzureAI:EndpointType"]);
             var kernel = new KernelFactory().Build(endpoint, apiKey, deploymentName, endpointType);
 
             services.AddSingleton(kernel);
             services.AddSingleton<IEnrichmentAgent, EnrichmentAgent>();
-            services.AddSingleton<ISpecGeneratorAgent, SpecGeneratorAgent>();
             services.AddSingleton<IKeywordExtractor>(sp =>
                 new LlmKeywordExtractor(sp.GetRequiredService<Microsoft.SemanticKernel.Kernel>(), sp.GetRequiredService<ILogger<LlmKeywordExtractor>>()));
             services.AddSingleton<IAdoClient>(sp =>
                 new AdoClient(sp.GetRequiredService<ConfigLoader>(), pat));
             services.AddSingleton<ICodebaseContextAgent>(sp =>
                 new CodebaseContextAgent(pat, sp.GetRequiredService<IKeywordExtractor>(), sp.GetRequiredService<ILogger<CodebaseContextAgent>>()));
+
+            if (useAgent)
+            {
+                var agentId = config["AzureAI:AgentId"]
+                    ?? throw new InvalidOperationException("AzureAI:AgentId secret is missing when AzureAI:UseAgent is true.");
+                services.AddSingleton<IFoundryAgentClient>(sp =>
+                    new FoundryAgentClient(endpoint, apiKey, agentId, sp.GetRequiredService<ILogger<FoundryAgentClient>>()));
+                services.AddSingleton<ISpecGeneratorAgent, FoundrySpecGeneratorAgent>();
+            }
+            else
+            {
+                services.AddSingleton<ISpecGeneratorAgent, SpecGeneratorAgent>();
+            }
         }
 
         services.AddLogging(logging =>

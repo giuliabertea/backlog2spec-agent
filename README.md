@@ -151,6 +151,10 @@ dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4o"
 
 # Azure DevOps PAT (required regardless of endpoint type)
 dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
+
+# Azure AI Foundry Agent mode (optional — Phase 1 upgrade, see section below)
+dotnet user-secrets set "AzureAI:AgentId"        "asst_abc123..."
+dotnet user-secrets set "AzureAI:UseAgent"       "true"
 ```
 
 > **Migrating from a previous version?** The secret keys were renamed:
@@ -431,3 +435,69 @@ Use `--global` instead of `--local` if you installed globally.
 | `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
 | `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 5 |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` in project | Run `dotnet new tool-manifest` in your project root, then reinstall |
+| `Unexpected error: AzureAI:AgentId secret is missing` | `UseAgent` is true but `AgentId` is not set | Run `dotnet user-secrets set "AzureAI:AgentId" "asst_..."` |
+
+---
+
+## Azure AI Foundry Agent mode (Phase 1)
+
+By default the tool calls the LLM directly for spec generation. Setting `AzureAI:UseAgent` to `true` routes spec generation through an Azure AI Foundry Agent instead, enabling you to iterate on the system prompt in the portal without touching code.
+
+### What changes
+
+- **Enrichment** — unchanged. Still runs as a direct LLM call via Semantic Kernel.
+- **Spec generation** — replaced by a call to your Foundry Agent. The agent receives all enrichment results, project config, dev rules, and codebase context as a structured JSON message and returns the spec JSON directly.
+
+### Step 1 — Create the agent in Azure AI Foundry portal
+
+1. Go to [ai.azure.com](https://ai.azure.com) → your project → **Agents** → **New agent**.
+2. Give it a name (e.g. `Backlog2Spec`).
+3. Paste the following system prompt:
+
+```
+You are a senior software engineer generating production-ready structured specs
+from Azure DevOps work items.
+
+You receive a JSON object with:
+  workItem:      the enriched ticket data (id, title, missingAcceptanceCriteria, edgeCases, constraints, affectedComponents, ambiguities)
+  projectConfig: stack, conventions, architecture
+  devRules:      (optional) team-specific architectural rules
+  repoContext:   (optional) relevant source file snippets
+
+Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
+{
+  "goal": "string",
+  "behaviour": ["string"],
+  "edgeCases": ["string"],
+  "outOfScope": ["string"],
+  "filesToChange": [{ "file": "string", "change": "string" }]
+}
+
+Rules:
+- Follow Clean Architecture principles
+- Respect devRules exactly — never suggest patterns listed as forbidden
+- Reference real file paths from repoContext when available
+- Be complete: cover all edge cases implied by the ticket
+```
+
+4. Select the same deployed model you use for the direct LLM path.
+5. Save the agent and note its **Agent ID** (format: `asst_abc123...`).
+
+### Step 2 — Set secrets
+
+```bash
+cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
+
+dotnet user-secrets set "AzureAI:AgentId"  "asst_abc123..."
+dotnet user-secrets set "AzureAI:UseAgent" "true"
+```
+
+The existing `AzureAI:Endpoint` and `AzureAI:ApiKey` secrets are reused — no change needed.
+
+### Switching back
+
+To revert to direct LLM calls, either remove `AzureAI:UseAgent` from user secrets or set it to `false`. No code change required.
+
+```bash
+dotnet user-secrets remove "AzureAI:UseAgent"
+```
