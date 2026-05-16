@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "Backlog2SpecAgent.cli": {
+      "version": "0.1.0",
+      "commands": [
+        "backlog-2-spec"
+      ],
+      "rollForward": false
+    }
+  }
+}

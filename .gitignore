@@ -1,0 +1,35 @@
+# Build output
+bin/
+obj/
+
+# NuGet packages and local pack output
+*.nupkg
+nupkg/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# dotnet user-secrets (stored in %APPDATA%, never in repo)
+secrets.json
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+
+# Publish output
+publish/

@@ -1,0 +1,21 @@
+{
+  "project": {
+    "name": "CCC",
+    "language": "C#",
+    "framework": ".NET 8 / ASP.NET Core",
+    "testFramework": "xUnit",
+    "architecture": "Clean Architecture"
+  },
+  "conventions": {
+    "naming": "PascalCase classes, camelCase private fields",
+    "folderStructure": "Feature-based",
+    "specStyle": "Gherkin",
+    "diPattern": "Constructor injection"
+  },
+  "ado": {
+    "organization": "https://dev.azure.com/your-org",
+    "project": "CCC",
+    "repoName": null,
+    "branch": null
+  }
+}

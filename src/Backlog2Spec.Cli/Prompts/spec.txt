@@ -1,0 +1,90 @@
+You are a senior software engineer writing a structured implementation specification.
+
+Generate a specification for the following enriched work item.
+Return ONLY valid JSON. No markdown, no commentary, no explanation. Just the JSON object.
+
+## JSON Schema
+
+{
+  "goal": "<string: 1–3 sentences. Sentence 1 states the capability being built. Sentences 2–3 are optional: use them only for the user/system-visible outcome or a non-obvious constraint or integration point.>",
+  "behaviour": ["<string: plain-English bullet describing one thing the implementation must do>", ...],
+  "edgeCases": ["<string>", ...],
+  "outOfScope": "<string: comma-separated list of things explicitly not included>",
+  "filesToChange": ["<string: file path and what changes, e.g. 'src/Services/AuthService.cs: add ValidateCredentials()'>", ...]
+}
+
+Rules:
+- Output EXACTLY these five fields in this exact order: goal, behaviour, edgeCases, outOfScope, filesToChange
+- Do NOT add extra fields
+- goal MUST be 1–3 sentences; sentence 1 is mandatory (the capability); sentences 2–3 only if they add new information about outcome or constraints
+- behaviour items MUST be plain English from the developer's perspective — never use Gherkin syntax (Given/When/Then/Scenario)
+- behaviour should cover all acceptance criteria plus the missing ones identified, one bullet per distinct behaviour
+- edgeCases should be actionable developer notes about boundary conditions to handle
+- outOfScope should be a concise string listing things that are explicitly excluded
+- filesToChange MUST use actual file paths from the Relevant Source Files where possible; if a path cannot be determined, use the class name followed by ? (e.g. AuthService?: add lockout logic)
+- filesToChange component names must follow the naming conventions in Project Context
+
+## Project Context
+
+Project: {{projectName}}
+Language: {{language}}
+Framework: {{framework}}
+Architecture: {{architecture}}
+Test framework: {{testFramework}}
+Naming: {{naming}}
+Spec style: {{specStyle}}
+
+Use these conventions exactly when naming components and writing file entries.
+Resolve class names to file paths using the source files below where possible.
+
+## Relevant Source Files
+
+The following files were identified as relevant to this work item. Use the actual file paths, class names, and method signatures you see here when writing filesToChange entries.
+
+{{codebaseContext}}
+
+{{devRules}}## Example Input
+
+Work Item ID: 42
+Title: Add user login page
+Missing Acceptance Criteria: Show error on invalid credentials, Lock after 5 failures
+Edge Cases: Mixed-case email, special chars in password, existing session
+Constraints: Passwords must not be logged
+Affected Components: AuthService, UserRepository, LoginPage UI
+Ambiguities: SSO support? Session timeout?
+
+## Example Output
+
+{
+  "goal": "Implement a login page where users authenticate with email and password. The feature includes credential validation, error messaging, and account lockout after repeated failures.",
+  "behaviour": [
+    "Validate submitted credentials against stored user records",
+    "Display an error message when credentials are invalid without revealing which field is wrong",
+    "Increment a failed attempt counter on each wrong password",
+    "Lock the account and show a lockout message after 5 consecutive failures",
+    "Redirect to the dashboard on successful login",
+    "If a valid session already exists, skip the login form and redirect immediately"
+  ],
+  "edgeCases": [
+    "Normalize email to lowercase before comparison",
+    "Handle passwords with special characters without escaping issues",
+    "Reset failed attempt counter on successful login"
+  ],
+  "outOfScope": "SSO integration, session timeout configuration, password reset flow",
+  "filesToChange": [
+    "src/Services/AuthService.cs: add ValidateCredentials() and EnforceLockout() methods",
+    "src/Repositories/UserRepository.cs: add UpdateFailedAttempts() and GetByEmail() methods",
+    "src/Controllers/LoginController.cs: add POST /login endpoint, return 423 on locked account",
+    "src/Pages/Login.razor: render login form, display validation errors, handle redirect"
+  ]
+}
+
+## Work Item to Specify
+
+Work Item ID: {{workItemId}}
+Title: {{title}}
+Missing Acceptance Criteria: {{missingAcceptanceCriteria}}
+Edge Cases: {{edgeCases}}
+Constraints: {{constraints}}
+Affected Components: {{affectedComponents}}
+Ambiguities: {{ambiguities}}
