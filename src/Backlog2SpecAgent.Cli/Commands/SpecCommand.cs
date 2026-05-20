@@ -12,33 +12,23 @@ namespace Backlog2SpecAgent.Cli.Commands;
 public sealed class SpecCommand : Command
 {
     private readonly IAdoClient _adoClient;
-    private readonly ICodebaseContextAgent _codebaseContextAgent;
-    private readonly IEnrichmentAgent _enrichmentAgent;
     private readonly ISpecGeneratorAgent _specGeneratorAgent;
     private readonly IOutputRenderer _renderer;
-    private readonly ConfigLoader _configLoader;
     private readonly ILogger<SpecCommand> _logger;
 
     public SpecCommand(
         IAdoClient adoClient,
-        ICodebaseContextAgent codebaseContextAgent,
-        IEnrichmentAgent enrichmentAgent,
         ISpecGeneratorAgent specGeneratorAgent,
         IOutputRenderer renderer,
-        ConfigLoader configLoader,
         ILogger<SpecCommand> logger)
         : base("spec", "Generate a structured spec from an Azure DevOps work item")
     {
         _adoClient = adoClient;
-        _codebaseContextAgent = codebaseContextAgent;
-        _enrichmentAgent = enrichmentAgent;
         _specGeneratorAgent = specGeneratorAgent;
         _renderer = renderer;
-        _configLoader = configLoader;
         _logger = logger;
 
         var idArg = new Argument<int>("id", "Azure DevOps work item ID");
-        var verboseOption = new Option<bool>("--verbose", "Show additional enrichment detail");
         var rawOption = new Option<bool>("--raw", "Output JSON only, no formatting");
         var mockOption = new Option<bool>("--mock", "Run pipeline with mock implementations (no external calls)");
         var outputOption = new Option<string?>("--output", "Save spec to a markdown file at the given path");
@@ -46,7 +36,6 @@ public sealed class SpecCommand : Command
         var epicOption = new Option<bool>("--epic", "Treat the work item as an Epic and export all child specs to a folder");
 
         AddArgument(idArg);
-        AddOption(verboseOption);
         AddOption(rawOption);
         AddOption(mockOption);
         AddOption(outputOption);
@@ -64,9 +53,7 @@ public sealed class SpecCommand : Command
         this.SetHandler(async (InvocationContext context) =>
         {
             var id = context.ParseResult.GetValueForArgument(idArg);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
             var raw = context.ParseResult.GetValueForOption(rawOption);
-            var mock = context.ParseResult.GetValueForOption(mockOption);
             var output = context.ParseResult.GetValueForOption(outputOption);
             var isFeature = context.ParseResult.GetValueForOption(featureOption);
             var isEpic = context.ParseResult.GetValueForOption(epicOption);
@@ -75,38 +62,19 @@ public sealed class SpecCommand : Command
             if (isFeature || isEpic)
                 exitCode = await ExecuteHierarchyAsync(id, isFeature, isEpic, raw, CancellationToken.None);
             else
-                exitCode = await ExecuteAsync(id, verbose, raw, mock, output, CancellationToken.None);
+                exitCode = await ExecuteAsync(id, raw, output, CancellationToken.None);
 
             Environment.Exit(exitCode);
         });
     }
 
-    private async Task<int> ExecuteAsync(
-        int id, bool verbose, bool raw, bool mock, string? output, CancellationToken ct)
+    private async Task<int> ExecuteAsync(int id, bool raw, string? output, CancellationToken ct)
     {
         try
         {
-            if (!raw) _renderer.RenderProgress("Loading configuration...");
-            var config = await _configLoader.LoadAsync(ct);
-
-            if (!raw) _renderer.RenderProgress($"Fetching work item #{id}...");
-            _logger.LogInformation("Fetching work item {WorkItemId}", id);
-            var workItem = await _adoClient.GetWorkItemAsync(id, ct);
-
-            if (!raw && !string.IsNullOrEmpty(config.Ado.RepoName))
-                _renderer.RenderProgress("Fetching codebase context...");
-            _logger.LogInformation("Fetching codebase context for work item {WorkItemId}", id);
-            var codebaseContext = await _codebaseContextAgent.FetchRelevantFilesAsync(workItem, config, ct);
-
-            if (!raw) _renderer.RenderProgress("Enriching ticket...");
-            _logger.LogInformation("Enriching work item {WorkItemId}", id);
-            var enriched = await _enrichmentAgent.EnrichAsync(workItem, config, codebaseContext, ct);
-
-            if (!raw && verbose) _renderer.RenderVerboseDetail(enriched);
-
             if (!raw) _renderer.RenderProgress("Generating spec...");
             _logger.LogInformation("Generating spec for work item {WorkItemId}", id);
-            var spec = await _specGeneratorAgent.GenerateAsync(enriched, config, codebaseContext, ct);
+            var spec = await _specGeneratorAgent.GenerateAsync(id, ct);
 
             if (raw)
             {
@@ -114,9 +82,9 @@ public sealed class SpecCommand : Command
             }
             else
             {
-                _renderer.RenderSpec(spec, verbose);
+                _renderer.RenderSpec(spec, false);
                 if (!string.IsNullOrEmpty(output))
-                    _renderer.RenderMarkdown(spec, enriched.Title, enriched.WorkItemId, output);
+                    _renderer.RenderMarkdown(spec, $"Work Item #{id}", id, output);
             }
 
             return 0;
@@ -160,9 +128,6 @@ public sealed class SpecCommand : Command
 
         try
         {
-            if (!raw) _renderer.RenderProgress("Loading configuration...");
-            var config = await _configLoader.LoadAsync(ct);
-
             if (!raw) _renderer.RenderProgress($"Fetching {expectedType} #{id} with children...");
             _logger.LogInformation("Fetching hierarchy for work item {WorkItemId}", id);
             var hierarchy = await _adoClient.GetWorkItemHierarchyAsync(id, ct);
@@ -181,10 +146,6 @@ public sealed class SpecCommand : Command
                 return 1;
             }
 
-            if (!raw && !string.IsNullOrEmpty(config.Ado.RepoName))
-                _renderer.RenderProgress("Fetching codebase context...");
-            var codebaseContext = await _codebaseContextAgent.FetchRelevantFilesAsync(hierarchy.Parent, config, ct);
-
             var results = new List<(WorkItemDto Item, GeneratedSpec Spec)>();
             var skipped = new List<int>();
             var total = hierarchy.Children.Count;
@@ -197,8 +158,7 @@ public sealed class SpecCommand : Command
 
                 try
                 {
-                    var enriched = await _enrichmentAgent.EnrichAsync(child, config, codebaseContext, ct);
-                    var spec = await _specGeneratorAgent.GenerateAsync(enriched, config, codebaseContext, ct);
+                    var spec = await _specGeneratorAgent.GenerateAsync(child.Id, ct);
                     results.Add((child, spec));
                 }
                 catch (Exception ex)
@@ -257,5 +217,4 @@ public sealed class SpecCommand : Command
             return 1;
         }
     }
-
 }

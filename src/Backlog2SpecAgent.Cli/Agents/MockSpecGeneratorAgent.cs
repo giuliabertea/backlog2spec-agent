@@ -1,23 +1,17 @@
-using Backlog2SpecAgent.Cli.Ado;
-using Backlog2SpecAgent.Cli.Config;
 using Backlog2SpecAgent.Cli.Models;
 
 namespace Backlog2SpecAgent.Cli.Agents;
 
 public sealed class MockSpecGeneratorAgent : ISpecGeneratorAgent
 {
-    public Task<GeneratedSpec> GenerateAsync(
-        EnrichedTicket enriched,
-        AgentConfig config,
-        IReadOnlyList<CodeFileDto> codebaseContext,
-        CancellationToken ct = default)
+    public Task<GeneratedSpec> GenerateAsync(int workItemId, CancellationToken ct = default)
     {
         return Task.FromResult(new GeneratedSpec
         {
             Goal = "Add a mock feature to validate the pipeline end-to-end. The mock returns fixed data to allow testing without an LLM call.",
             Behaviour =
             [
-                "Return a fixed spec when called with any enriched ticket",
+                "Return a fixed spec when called with any work item ID",
                 "Return an error result when input is flagged as invalid"
             ],
             EdgeCases = ["Null input", "Extremely large payload"],

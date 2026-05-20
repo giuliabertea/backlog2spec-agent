@@ -19,23 +19,38 @@ public sealed class SpecGeneratorAgent : ISpecGeneratorAgent
     };
 
     private readonly Microsoft.SemanticKernel.Kernel _kernel;
+    private readonly IAdoClient _adoClient;
+    private readonly IEnrichmentAgent _enrichmentAgent;
+    private readonly ICodebaseContextAgent _codebaseContextAgent;
+    private readonly ConfigLoader _configLoader;
     private readonly ILogger<SpecGeneratorAgent> _logger;
     private readonly string _promptTemplate;
 
-    public SpecGeneratorAgent(Microsoft.SemanticKernel.Kernel kernel, ILogger<SpecGeneratorAgent> logger)
+    public SpecGeneratorAgent(
+        Microsoft.SemanticKernel.Kernel kernel,
+        IAdoClient adoClient,
+        IEnrichmentAgent enrichmentAgent,
+        ICodebaseContextAgent codebaseContextAgent,
+        ConfigLoader configLoader,
+        ILogger<SpecGeneratorAgent> logger)
     {
         _kernel = kernel;
+        _adoClient = adoClient;
+        _enrichmentAgent = enrichmentAgent;
+        _codebaseContextAgent = codebaseContextAgent;
+        _configLoader = configLoader;
         _logger = logger;
         _promptTemplate = LoadPrompt();
     }
 
-    public async Task<GeneratedSpec> GenerateAsync(
-        EnrichedTicket enriched,
-        AgentConfig config,
-        IReadOnlyList<CodeFileDto> codebaseContext,
-        CancellationToken ct = default)
+    public async Task<GeneratedSpec> GenerateAsync(int workItemId, CancellationToken ct = default)
     {
-        _logger.LogInformation("Starting spec generation for work item {WorkItemId}", enriched.WorkItemId);
+        _logger.LogInformation("Starting spec generation for work item {WorkItemId}", workItemId);
+
+        var config = await _configLoader.LoadAsync(ct);
+        var workItem = await _adoClient.GetWorkItemAsync(workItemId, ct);
+        var codebaseContext = await _codebaseContextAgent.FetchRelevantFilesAsync(workItem, config, ct);
+        var enriched = await _enrichmentAgent.EnrichAsync(workItem, config, codebaseContext, ct);
 
         var prompt = BuildPrompt(enriched, config, codebaseContext);
         var chatService = _kernel.GetRequiredService<IChatCompletionService>();
@@ -69,7 +84,7 @@ public sealed class SpecGeneratorAgent : ISpecGeneratorAgent
                 var result = JsonSerializer.Deserialize<GeneratedSpec>(json, JsonOptions);
                 if (result is not null)
                 {
-                    _logger.LogInformation("Spec generation completed for work item {WorkItemId}", enriched.WorkItemId);
+                    _logger.LogInformation("Spec generation completed for work item {WorkItemId}", workItemId);
                     return result;
                 }
             }

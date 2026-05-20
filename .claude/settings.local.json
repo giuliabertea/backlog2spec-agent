@@ -60,7 +60,12 @@
       "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"InternalMessageTextDetails|MessageContent\\\\b\" } | Select-Object -ExpandProperty name | Select-Object -First 20)",
       "PowerShell($xml = \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\1.0.0-beta.4\\\\lib\\\\netstandard2.0\\\\Azure.AI.OpenAI.Assistants.xml\"; $doc = [xml]\\(Get-Content $xml\\); $doc.doc.members.member | Where-Object { $_.name -match \"^P:Azure.AI.OpenAI.Assistants.ThreadMessage\\\\.\" } | Select-Object -ExpandProperty name)",
       "Bash(Get-ChildItem -Recurse -Filter \"*.csproj\" \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\")",
-      "PowerShell(dotnet build \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\Backlog2SpecAgent.sln\")"
+      "PowerShell(dotnet build \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\Backlog2SpecAgent.sln\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\" -Recurse)",
+      "PowerShell(head -100)",
+      "PowerShell(New-Guid | ForEach-Object { $_.ToString\\(\"B\"\\).ToUpper\\(\\) })",
+      "PowerShell(dotnet build \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\src\\\\Backlog2SpecAgent.Tools\\\\Backlog2SpecAgent.Tools.csproj\" 2>&1)",
+      "PowerShell(dotnet build \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\Backlog2SpecAgent.sln\" 2>&1)"
     ]
   }
 }

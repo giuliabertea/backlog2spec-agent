@@ -1,7 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Backlog2SpecAgent.Cli.Ado;
-using Backlog2SpecAgent.Cli.Config;
 using Backlog2SpecAgent.Cli.Infrastructure.AI;
 using Backlog2SpecAgent.Cli.Models;
 using Microsoft.Extensions.Logging;
@@ -32,22 +30,18 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         _logger = logger;
     }
 
-    public async Task<GeneratedSpec> GenerateAsync(
-        EnrichedTicket enriched,
-        AgentConfig config,
-        IReadOnlyList<CodeFileDto> codebaseContext,
-        CancellationToken ct = default)
+    public async Task<GeneratedSpec> GenerateAsync(int workItemId, CancellationToken ct = default)
     {
-        _logger.LogInformation("Starting Foundry Agent spec generation for work item {WorkItemId}", enriched.WorkItemId);
+        _logger.LogInformation("Starting Foundry Agent spec generation for work item {WorkItemId}", workItemId);
 
-        var userMessage = BuildPayload(enriched, config, codebaseContext);
+        var payload = JsonSerializer.Serialize(new { workItemId }, PayloadOptions);
 
         string lastRaw = string.Empty;
         JsonException? lastException = null;
 
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
-            lastRaw = await _agentClient.RunAsync(userMessage, ct);
+            lastRaw = await _agentClient.RunAsync(payload, ct);
             _logger.LogDebug("Foundry Agent response size: {Chars} chars (attempt {Attempt})", lastRaw.Length, attempt + 1);
 
             try
@@ -56,7 +50,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
                 var foundrySpec = JsonSerializer.Deserialize<FoundrySpec>(json, JsonOptions);
                 if (foundrySpec is not null)
                 {
-                    _logger.LogInformation("Foundry Agent spec generation completed for work item {WorkItemId}", enriched.WorkItemId);
+                    _logger.LogInformation("Foundry Agent spec generation completed for work item {WorkItemId}", workItemId);
                     return MapToGeneratedSpec(foundrySpec);
                 }
             }
@@ -68,41 +62,6 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         }
 
         throw new LlmFormatException(lastRaw, lastException);
-    }
-
-    private static string BuildPayload(EnrichedTicket enriched, AgentConfig config, IReadOnlyList<CodeFileDto> codebaseContext)
-    {
-        var payload = new
-        {
-            workItem = new
-            {
-                id = enriched.WorkItemId,
-                title = enriched.Title,
-                missingAcceptanceCriteria = enriched.MissingAcceptanceCriteria,
-                edgeCases = enriched.EdgeCases,
-                constraints = enriched.Constraints,
-                affectedComponents = enriched.AffectedComponents,
-                ambiguities = enriched.Ambiguities
-            },
-            projectConfig = new
-            {
-                name = config.Project.Name,
-                language = config.Project.Language,
-                framework = config.Project.Framework,
-                architecture = config.Project.Architecture,
-                testFramework = config.Project.TestFramework,
-                conventions = new
-                {
-                    naming = config.Conventions.Naming,
-                    specStyle = config.Conventions.SpecStyle,
-                    diPattern = config.Conventions.DiPattern
-                }
-            },
-            devRules = config.DevRulesContent ?? string.Empty,
-            repoContext = codebaseContext.Select(f => new { path = f.Path, content = f.Content }).ToArray()
-        };
-
-        return JsonSerializer.Serialize(payload, PayloadOptions);
     }
 
     private static GeneratedSpec MapToGeneratedSpec(FoundrySpec foundrySpec) =>
