@@ -85,7 +85,7 @@ dotnet tool install --global --add-source ./nupkg Backlog2SpecAgent.Cli
 Verify the installation:
 
 ```bash
-dotnet backlog-2-spec --version
+backlog-2-spec-agent --version
 ```
 
 ---
@@ -169,7 +169,7 @@ Before making any real ADO or AI calls, run a mock smoke test from inside **your
 
 ```bash
 cd path/to/your-project
-dotnet backlog-2-spec spec 1 --mock
+backlog-2-spec-agent spec 1 --mock
 ```
 
 This runs the full pipeline with no external calls. If it prints a spec, your config file is found and parsed correctly. Proceed to real usage only after this passes.
@@ -181,7 +181,7 @@ This runs the full pipeline with no external calls. If it prints a spec, your co
 ### Basic
 
 ```bash
-dotnet backlog-2-spec spec 12345
+backlog-2-spec-agent spec 12345
 ```
 
 Fetches work item #12345, enriches it, and prints the spec to the terminal.
@@ -189,7 +189,7 @@ Fetches work item #12345, enriches it, and prints the spec to the terminal.
 ### With verbose enrichment detail
 
 ```bash
-dotnet backlog-2-spec spec 12345 --verbose
+backlog-2-spec-agent spec 12345 --verbose
 ```
 
 Shows the AI-identified missing acceptance criteria, edge cases, and ambiguities before the spec.
@@ -197,20 +197,20 @@ Shows the AI-identified missing acceptance criteria, edge cases, and ambiguities
 ### Save to markdown
 
 ```bash
-dotnet backlog-2-spec spec 12345 --output ./specs/feature-12345.md
+backlog-2-spec-agent spec 12345 --output ./specs/feature-12345.md
 ```
 
 ### JSON output (pipe-friendly)
 
 ```bash
-dotnet backlog-2-spec spec 12345 --raw
-dotnet backlog-2-spec spec 12345 --raw | jq .goal
+backlog-2-spec-agent spec 12345 --raw
+backlog-2-spec-agent spec 12345 --raw | jq .goal
 ```
 
 ### Dry run without external calls
 
 ```bash
-dotnet backlog-2-spec spec 12345 --mock
+backlog-2-spec-agent spec 12345 --mock
 ```
 
 Runs the full pipeline with mock implementations — no ADO or AI calls. Useful for testing config and output formatting.
@@ -218,8 +218,8 @@ Runs the full pipeline with mock implementations — no ADO or AI calls. Useful 
 ### Export all specs for a Feature or Epic
 
 ```bash
-dotnet backlog-2-spec spec 12345 --feature
-dotnet backlog-2-spec spec 12345 --epic
+backlog-2-spec-agent spec 12345 --feature
+backlog-2-spec-agent spec 12345 --epic
 ```
 
 Fetches the parent work item and all its children, generates a spec for each child, and writes them to a folder under `spec/<id>-<slug>/`. A `_summary.md` index file is also created with a table linking to each child spec.
@@ -394,7 +394,7 @@ If `devRulesFile` is not set, both steps run without any injected rules — the 
 ## Mock mode
 
 ```bash
-dotnet backlog-2-spec spec 12345 --mock
+backlog-2-spec-agent spec 12345 --mock
 ```
 
 Mock mode replaces every external dependency — ADO client, enrichment agent, spec generator — with fast stub implementations that return fixed data. No credentials are required and no network calls are made.

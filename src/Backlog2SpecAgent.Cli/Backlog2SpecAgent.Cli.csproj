@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackAsTool>true</PackAsTool>
-    <ToolCommandName>backlog-2-spec</ToolCommandName>
+    <ToolCommandName>backlog-2-spec-agent</ToolCommandName>
     <PackageId>Backlog2SpecAgent.Cli</PackageId>
     <Version>0.1.0</Version>
     <UserSecretsId>b2s-cli-a1b2c3d4-e5f6-7890-abcd-ef1234567890</UserSecretsId>
