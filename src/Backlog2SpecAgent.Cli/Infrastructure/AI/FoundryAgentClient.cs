@@ -11,19 +11,35 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(1);
 
     private readonly AssistantsClient _client;
-    private readonly string _agentId;
+    private readonly string _agentName;
     private readonly ILogger<FoundryAgentClient> _logger;
+    // Resolved once on first use and cached for the lifetime of this singleton.
+    private readonly Lazy<Task<string>> _agentIdResolver;
 
-    public FoundryAgentClient(string endpoint, string apiKey, string agentId, ILogger<FoundryAgentClient> logger)
+    public FoundryAgentClient(string endpoint, string apiKey, string agentName, ILogger<FoundryAgentClient> logger)
     {
         _client = new AssistantsClient(new Uri(endpoint), new AzureKeyCredential(apiKey));
-        _agentId = agentId;
+        _agentName = agentName;
         _logger = logger;
+        _agentIdResolver = new Lazy<Task<string>>(() => ResolveAgentIdAsync(agentName));
+    }
+
+    private async Task<string> ResolveAgentIdAsync(string agentName)
+    {
+        _logger.LogDebug("Resolving agent ID for name '{AgentName}'", agentName);
+        var assistants = (await _client.GetAssistantsAsync()).Value;
+        var match = assistants.Data.FirstOrDefault(a => a.Name == agentName);
+        if (match is null)
+            throw new InvalidOperationException(
+                $"Agent '{agentName}' not found. Check AzureAI:AgentName in config.");
+        _logger.LogDebug("Resolved agent '{AgentName}' to ID {AgentId}", agentName, match.Id);
+        return match.Id;
     }
 
     public async Task<string> RunAsync(string userMessage, CancellationToken ct = default)
     {
         // TODO Phase 3: RAG — trigger knowledge search over the codebase index here before creating the thread
+        var agentId = await _agentIdResolver.Value;
         var thread = (await _client.CreateThreadAsync(ct)).Value;
         _logger.LogDebug("Created agent thread {ThreadId}", thread.Id);
 
@@ -37,7 +53,7 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
 
             var run = (await _client.CreateRunAsync(
                 thread.Id,
-                new CreateRunOptions(_agentId),
+                new CreateRunOptions(agentId),
                 ct)).Value;
 
             _logger.LogDebug("Started agent run {RunId} on thread {ThreadId}", run.Id, thread.Id);

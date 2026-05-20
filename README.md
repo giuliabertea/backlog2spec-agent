@@ -153,7 +153,7 @@ dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4o"
 dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
 
 # Azure AI Foundry Agent mode (optional — Phase 1 upgrade, see section below)
-dotnet user-secrets set "AzureAI:AgentId"        "asst_abc123..."
+dotnet user-secrets set "AzureAI:AgentName"      "backlog2spec-agent"
 dotnet user-secrets set "AzureAI:UseAgent"       "true"
 ```
 
@@ -435,7 +435,8 @@ Use `--global` instead of `--local` if you installed globally.
 | `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
 | `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 5 |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` in project | Run `dotnet new tool-manifest` in your project root, then reinstall |
-| `Unexpected error: AzureAI:AgentId secret is missing` | `UseAgent` is true but `AgentId` is not set | Run `dotnet user-secrets set "AzureAI:AgentId" "asst_..."` |
+| `Unexpected error: AzureAI:AgentName secret is missing` | `UseAgent` is true but `AgentName` is not set | Run `dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"` |
+| `Agent 'backlog2spec-agent' not found` | Agent name does not match any agent in the portal | Check the agent name in [ai.azure.com](https://ai.azure.com) and update `AzureAI:AgentName` |
 
 ---
 
@@ -481,18 +482,18 @@ Rules:
 ```
 
 4. Select the same deployed model you use for the direct LLM path.
-5. Save the agent and note its **Agent ID** (format: `asst_abc123...`).
+5. Save the agent. The tool resolves the agent by name at runtime — you do not need to copy the agent ID.
 
 ### Step 2 — Set secrets
 
 ```bash
 cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
 
-dotnet user-secrets set "AzureAI:AgentId"  "asst_abc123..."
-dotnet user-secrets set "AzureAI:UseAgent" "true"
+dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"
+dotnet user-secrets set "AzureAI:UseAgent"  "true"
 ```
 
-The existing `AzureAI:Endpoint` and `AzureAI:ApiKey` secrets are reused — no change needed.
+Use the exact name you gave the agent in the portal (case-sensitive). The existing `AzureAI:Endpoint` and `AzureAI:ApiKey` secrets are reused — no change needed.
 
 ### Switching back
 
