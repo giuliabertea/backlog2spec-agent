@@ -440,7 +440,100 @@ Use `--global` instead of `--local` if you installed globally.
 
 ---
 
-## Azure AI Foundry Agent mode (Phase 1)
+## Azure AI Foundry Agent mode (Phase 2 — Tools API)
+
+Phase 2 adds real tool capabilities to the agent. Instead of the CLI pre-fetching work item data and passing it as a large payload, the agent calls two HTTP tools at runtime:
+
+| Tool | Endpoint | What it does |
+|---|---|---|
+| `get_work_item` | `GET /workitem/{id}` | Fetches the ADO work item by ID |
+| `repo_context` | `POST /repo-context` | Returns relevant source file snippets for a query |
+
+A third endpoint (`POST /spec`) lets the agent persist a generated spec to disk.
+
+### Step 1 — Deploy `Backlog2SpecAgent.Tools`
+
+The Tools API is a self-contained ASP.NET Core minimal API. Build and run it with Docker:
+
+```bash
+# From the repo root
+docker build -f src/Backlog2SpecAgent.Tools/Dockerfile . -t b2s-tools
+
+docker run -d -p 8080:8080 \
+  -e Ado__Organization="https://dev.azure.com/your-org" \
+  -e Ado__Project="YourProject" \
+  -e Ado__RepoName="YourRepo" \
+  -e Ado__Branch="main" \
+  -e Ado__Pat="your-ado-pat" \
+  -e Security__ApiKey="your-secret-key" \
+  b2s-tools
+```
+
+Or run locally without Docker:
+
+```bash
+cd src/Backlog2SpecAgent.Tools
+dotnet run
+```
+
+Set the following environment variables (or use `dotnet user-secrets` if running locally via the CLI project):
+
+| Variable | Description |
+|---|---|
+| `Ado__Organization` | Full ADO org URL, e.g. `https://dev.azure.com/your-org` |
+| `Ado__Project` | ADO project name |
+| `Ado__RepoName` | Repository name (optional — leave empty to skip repo context) |
+| `Ado__Branch` | Branch to search (default: `main`) |
+| `Ado__Pat` | Azure DevOps Personal Access Token |
+| `Security__ApiKey` | Shared secret used for the `X-Api-Key` header |
+
+### Step 2 — Update the agent system prompt
+
+In [ai.azure.com](https://ai.azure.com), update your agent's system prompt to reflect that it now fetches data via tools:
+
+```
+You are a senior software engineer generating production-ready structured specs
+from Azure DevOps work items.
+
+You receive a JSON object with a single field: { "workItemId": <int> }.
+
+Steps:
+1. Call get_work_item with the workItemId to fetch the ticket details.
+2. Call repo_context with a relevant search query to fetch related source files.
+3. Using the ticket data and source context, generate a structured spec.
+
+Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
+{
+  "goal": "string",
+  "behaviour": ["string"],
+  "edgeCases": ["string"],
+  "outOfScope": ["string"],
+  "filesToChange": [{ "file": "string", "change": "string" }]
+}
+
+Rules:
+- Follow Clean Architecture principles
+- Reference real file paths from the repo context when available
+- Be complete: cover all edge cases implied by the ticket
+```
+
+> The tool definitions (`get_work_item`, `repo_context`) are registered automatically by the CLI on first use — you do not need to add them in the portal.
+
+### Step 3 — Set CLI secrets for the Tools API
+
+```bash
+cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
+
+dotnet user-secrets set "AzureAI:ToolsBaseUrl"  "https://your-tools-api.azurewebsites.net"
+dotnet user-secrets set "AzureAI:ToolsApiKey"   "your-secret-key"
+dotnet user-secrets set "Security:ApiKey"        "your-secret-key"
+```
+
+Both `AzureAI:ToolsApiKey` and `Security:ApiKey` must match the value you set in the Tools API deployment.
+
+---
+
+# Azure AI Foundry Agent mode (Phase 1)
 
 By default the tool calls the LLM directly for spec generation. Setting `AzureAI:UseAgent` to `true` routes spec generation through an Azure AI Foundry Agent instead, enabling you to iterate on the system prompt in the portal without touching code.
 
