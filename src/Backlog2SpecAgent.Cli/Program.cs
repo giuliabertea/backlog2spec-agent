@@ -41,7 +41,6 @@ var host = Host.CreateDefaultBuilder(args)
         }
         else
         {
-            var endpoint = config["AzureAI:Endpoint"] ?? throw new InvalidOperationException("AzureAI:Endpoint secret is missing.");
             var apiKey = config["AzureAI:ApiKey"] ?? throw new InvalidOperationException("AzureAI:ApiKey secret is missing.");
             var pat = config["Ado:Pat"] ?? throw new InvalidOperationException("Ado:Pat secret is missing.");
             var useAgent = config.GetValue<bool>("AzureAI:UseAgent");
@@ -51,6 +50,8 @@ var host = Host.CreateDefaultBuilder(args)
 
             if (useAgent)
             {
+                var projectEndpoint = config["AzureAI:ProjectEndpoint"]
+                    ?? throw new InvalidOperationException("AzureAI:ProjectEndpoint secret is missing when AzureAI:UseAgent is true.");
                 var agentName = config["AzureAI:AgentName"]
                     ?? throw new InvalidOperationException("AzureAI:AgentName secret is missing when AzureAI:UseAgent is true.");
                 var toolsBaseUrl = config["AzureAI:ToolsBaseUrl"]
@@ -58,12 +59,13 @@ var host = Host.CreateDefaultBuilder(args)
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");
                 services.AddSingleton<IFoundryAgentClient>(sp =>
-                    new FoundryAgentClient(endpoint, apiKey, agentName, toolsBaseUrl, toolsApiKey,
+                    new FoundryAgentClient(projectEndpoint, apiKey, agentName, toolsBaseUrl, toolsApiKey,
                         sp.GetRequiredService<ILogger<FoundryAgentClient>>()));
                 services.AddSingleton<ISpecGeneratorAgent, FoundrySpecGeneratorAgent>();
             }
             else
             {
+                var endpoint = config["AzureAI:Endpoint"] ?? throw new InvalidOperationException("AzureAI:Endpoint secret is missing.");
                 var deploymentName = config["AzureAI:DeploymentName"] ?? throw new InvalidOperationException("AzureAI:DeploymentName secret is missing.");
                 var endpointType = ParseEndpointType(config["AzureAI:EndpointType"]);
                 var kernel = new KernelFactory().Build(endpoint, apiKey, deploymentName, endpointType);

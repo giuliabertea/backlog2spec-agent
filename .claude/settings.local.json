@@ -69,7 +69,12 @@
       "Bash(find \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\" -type d -name \"azure.ai.agents*\" | head -5)",
       "Read(//c/Users/gbert/.nuget/packages/**)",
       "PowerShell(ls \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\\" -ErrorAction SilentlyContinue | Select-Object Name)",
-      "Bash(openspec list *)"
+      "Bash(openspec list *)",
+      "WebFetch(domain:www.nuget.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh api *)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(i['path']\\) for i in data.get\\('tree',[]\\) if 'AI.Agents.Persistent' in i.get\\('path',''\\) and i['path'].endswith\\('.cs'\\) and 'Sample7' in i['path']]\")"
     ]
   }
 }
