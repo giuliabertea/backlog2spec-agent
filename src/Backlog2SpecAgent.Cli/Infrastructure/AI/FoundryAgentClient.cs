@@ -43,12 +43,18 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
 
     public FoundryAgentClient(
         string projectEndpoint,
+        string tenantId,
         string agentName,
         string toolsBaseUrl,
         string toolsApiKey,
         ILogger<FoundryAgentClient> logger)
     {
-        _client = new PersistentAgentsClient(projectEndpoint, new DefaultAzureCredential());
+        _client = new PersistentAgentsClient(projectEndpoint, new DefaultAzureCredential(
+            new DefaultAzureCredentialOptions
+            {
+                TenantId = tenantId,
+                VisualStudioTenantId = tenantId
+            }));
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _logger = logger;
 
