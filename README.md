@@ -298,7 +298,7 @@ This step builds the Azure AI Search index that lets the agent retrieve grounded
 The script:
 - Recursively scans `.cs` and `.md` files; skips `bin/`, `obj/`, and `*.generated.cs`
 - Splits files into 300–500 line chunks at class/method and heading boundaries
-- Upserts chunks to an index named `repo-context` (created automatically on first run)
+- Upserts chunks to an index named `codebase-chunks` by default (created automatically on first run; override with `-IndexName`)
 - Is safe to re-run — existing documents are updated, not duplicated
 
 Typical run on a 50-file project takes under 30 seconds.

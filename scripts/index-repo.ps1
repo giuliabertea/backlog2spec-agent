@@ -19,7 +19,7 @@
     Root directory of the repository to index.
 
 .PARAMETER IndexName
-    Target search index name (default: repo-context).
+    Target search index name (default: codebase-chunks).
     The index is created automatically if it does not exist.
 
 .EXAMPLE
@@ -33,7 +33,7 @@ param(
     [Parameter(Mandatory)][string] $SearchUrl,
     [Parameter(Mandatory)][string] $SearchKey,
     [Parameter(Mandatory)][string] $RepoPath,
-    [string]                        $IndexName = 'repo-context'
+    [string]                        $IndexName = 'codebase-chunks'
 )
 
 Set-StrictMode -Version 1
