@@ -8,43 +8,169 @@ The output renders in the terminal with syntax highlighting, can be saved as a m
 
 ---
 
-## Prerequisites
+## How it works
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8)
-- An Azure DevOps account with access to your project
-- An AI endpoint — either an [Azure AI Foundry](https://ai.azure.com) project with a deployed model, or a classic Azure OpenAI resource
+```
+ADO work item
+      │
+      ▼
+  Enrichment          ← infers missing AC, edge cases, ambiguities (direct LLM call)
+      │
+      ▼
+  Spec generation     ← produces Goal / Behaviour / Edge Cases / Out of Scope / Files to Change
+      │               ← uses: project config + dev rules + codebase context (ADO repo or RAG)
+      ▼
+  Terminal / .md / JSON
+```
 
----
+Three modes of operation — pick the one that fits your setup:
 
-## Setup
+| Mode | What runs | When to use |
+|---|---|---|
+| **Direct** (default) | CLI → Azure OpenAI LLM | Simplest, works immediately |
+| **Agent** (Phase 1) | CLI → Azure AI Foundry Agent | Iterate on the system prompt in the portal without code changes |
+| **Agent + Tools** (Phase 2) | Agent calls `/workitem` and `/repo-context` HTTP tools at runtime | Full agentic flow; agent fetches its own data |
 
-Follow these steps in order. Steps 1–2 are one-time Azure setup. Steps 3–5 are one-time per machine. Steps 6–7 are one-time per project and should be committed to your project repo.
-
-### Step 1 — Create an Azure AI Foundry project
-
-> **Team note:** You can create one shared project for the whole team (simpler — one endpoint and API key to distribute) or each developer can create their own (fully isolated quota). Either approach works; the secrets setup in Step 5 is identical either way.
-
-1. Go to [ai.azure.com](https://ai.azure.com) and sign in with your Azure account.
-2. Click **New project**, give it a name, and let it create a hub and resource group.
-3. Inside the project, go to **Model catalog** → search for `gpt-4o` → **Deploy**.
-4. Give the deployment a name (e.g. `gpt-4o`) and confirm.
-5. Once deployed, go to **Project → Settings → Keys and Endpoints** and note:
-   - **Endpoint URL** — looks like `https://<name>.<region>.inference.ai.azure.com`
-   - **API Key**
-   - **Deployment name** — whatever you used in step 4
-
-You will need these three values in Step 5.
-
-> If you are using a **classic Azure OpenAI resource** instead, use the endpoint from your Azure OpenAI resource (format: `https://your-resource.openai.azure.com`) and omit `AzureAI:EndpointType` (or set it to `AzureOpenAI`).
+RAG (Phase 3) enriches the `repo-context` tool with a pre-built Azure AI Search index of your codebase, so the agent retrieves precise file snippets rather than guessing from ADO repo browsing.
 
 ---
 
-### Step 2 — Create an Azure DevOps PAT
+## Quick start — deploy Azure resources
+
+The ARM template in `infra/azuredeploy.json` provisions everything in one command:
+
+- Azure AI Services account with GPT-4o deployment
+- Azure AI Foundry hub + project (for agent mode)
+- Azure AI Search service (for RAG)
+
+### Option A — Azure CLI
+
+```bash
+# 1. Create a resource group (skip if you have one)
+az group create --name b2s-rg --location eastus
+
+# 2. Deploy all resources (~5 minutes)
+az deployment group create \
+  --resource-group b2s-rg \
+  --template-file infra/azuredeploy.json \
+  --parameters prefix=b2s location=eastus
+
+# 3. Read the outputs — you will need these values in Step 6 (secrets)
+az deployment group show \
+  --resource-group b2s-rg \
+  --name azuredeploy \
+  --query properties.outputs
+```
+
+### Option B — PowerShell
+
+```powershell
+# 1. Create a resource group (skip if you have one)
+New-AzResourceGroup -Name b2s-rg -Location eastus
+
+# 2. Deploy all resources
+New-AzResourceGroupDeployment `
+  -ResourceGroupName b2s-rg `
+  -TemplateFile infra/azuredeploy.json `
+  -prefix b2s `
+  -location eastus
+
+# 3. Read the outputs
+(Get-AzResourceGroupDeployment -ResourceGroupName b2s-rg -Name azuredeploy).Outputs
+```
+
+### Option C — Azure Portal
+
+1. Go to [portal.azure.com](https://portal.azure.com) → **Deploy a custom template** → **Build your own template in the editor**.
+2. Paste the contents of `infra/azuredeploy.json` and save.
+3. Fill in `prefix` and `location`, then deploy.
+
+> **GPT-4o regions:** The model is available in `eastus`, `eastus2`, `swedencentral`, `australiaeast`, `westus`, `westus3`. Use the same region for all resources to avoid cross-region egress.
+
+> **Search SKU:** `free` is enough for small repos (≤ 50 MB, 1 per subscription). Use `basic` for a real codebase.
+
+The outputs contain the exact values you will paste into `dotnet user-secrets` in Step 6.
+
+---
+
+## Step-by-step setup
+
+Follow these steps in order. Steps 1–3 are one-time Azure setup. Steps 4–6 are one-time per machine. Steps 7–9 are one-time per project.
+
+### Step 1 — Provision Azure resources
+
+Use the ARM template above (recommended) **or** create the resources manually:
+
+<details>
+<summary>Manual Azure setup (click to expand)</summary>
+
+#### 1a — Azure AI Foundry
+
+1. Go to [ai.azure.com](https://ai.azure.com) and sign in.
+2. Click **New project** → give it a name → let it create a hub and resource group.
+3. Inside the project go to **Model catalog** → search `gpt-4o` → **Deploy**.
+4. Deployment name: `gpt-4o`. Confirm.
+5. Go to **Project → Settings → Keys and Endpoints** and note the **Endpoint URL** and **API Key**.
+
+> Classic Azure OpenAI resource also works: use `https://your-resource.openai.azure.com` as the endpoint and omit `AzureAI:EndpointType` (or set it to `AzureOpenAI`).
+
+#### 1b — Azure AI Search (for RAG — Phase 3)
+
+1. In the [Azure portal](https://portal.azure.com) search for **Azure AI Search** → **Create**.
+2. Choose **Basic** tier (or **Free** for small repos).
+3. Same region as your AI Foundry project.
+4. Once deployed, go to **Settings → Keys** and note the **Admin key** and the service URL (`https://<name>.search.windows.net`).
+
+</details>
+
+---
+
+### Step 2 — Create the Foundry agent (Agent mode only)
+
+> Skip this step if you are using **Direct mode** (the default). You can always add Agent mode later.
+
+1. Go to [ai.azure.com](https://ai.azure.com) → your project → **Agents** → **New agent**.
+2. Name it exactly `backlog2spec-agent` (the CLI resolves agents by name).
+3. Paste this system prompt:
+
+```
+You are a senior software engineer generating production-ready structured specs
+from Azure DevOps work items.
+
+You receive a JSON object with:
+  workItem:      the enriched ticket data (id, title, missingAcceptanceCriteria, edgeCases, constraints, affectedComponents, ambiguities)
+  projectConfig: stack, conventions, architecture
+  devRules:      (optional) team-specific architectural rules
+  repoContext:   (optional) relevant source file snippets
+
+Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
+{
+  "goal": "string",
+  "behaviour": ["string"],
+  "edgeCases": ["string"],
+  "outOfScope": ["string"],
+  "filesToChange": [{ "file": "string", "change": "string" }]
+}
+
+Rules:
+- Follow Clean Architecture principles
+- Respect devRules exactly — never suggest patterns listed as forbidden
+- Reference real file paths from repoContext when available
+- Be complete: cover all edge cases implied by the ticket
+```
+
+4. Select the `gpt-4o` deployment. Save the agent.
+
+> The tool registers the `get_work_item` and `repo_context` tool definitions on the agent automatically at first use — you do not need to add them manually in the portal.
+
+---
+
+### Step 3 — Create an Azure DevOps PAT
 
 Each developer needs their own Personal Access Token.
 
 1. Go to `https://dev.azure.com/{your-org}/_usersSettings/tokens` → **New Token**.
-2. Configure it:
+2. Configure:
 
    | Setting | Value |
    |---|---|
@@ -57,42 +183,29 @@ Each developer needs their own Personal Access Token.
 
 ---
 
-### Step 3 — Clone this repo and install the tool
+### Step 4 — Clone this repo and install the CLI tool
 
 ```bash
 git clone https://github.com/giuliabertea/Backlog2SpecAgent
 cd Backlog2SpecAgent
 
 dotnet pack src/Backlog2SpecAgent.Cli -o ./nupkg
-dotnet tool install --local --add-source ./nupkg Backlog2SpecAgent.Cli
-```
-
-The `--local` flag installs the tool into your current project's tool manifest (`.config/dotnet-tools.json`). If your project does not have one yet, create it first:
-
-```bash
-# Run this inside YOUR project directory, not the Backlog2SpecAgent repo
-dotnet new tool-manifest
-```
-
-Then go back to the Backlog2SpecAgent repo and run the `dotnet pack` / `dotnet tool install` commands above.
-
-Alternatively, install globally to avoid the manifest requirement:
-
-```bash
 dotnet tool install --global --add-source ./nupkg Backlog2SpecAgent.Cli
 ```
 
-Verify the installation:
+Verify:
 
 ```bash
 backlog-2-spec-agent --version
 ```
 
+> **Local install (per-project):** If you prefer `--local` instead of `--global`, first run `dotnet new tool-manifest` inside **your** project directory, then come back here and run the install with `--local`.
+
 ---
 
-### Step 4 — Add the config file to your project
+### Step 5 — Add the config file to your project
 
-Create `backlog-2-spec.json` in the root of **your project** (not the Backlog2SpecAgent repo). The tool searches upward from the current directory to find it.
+Create `backlog-2-spec.json` in the root of **your project** (not the Backlog2SpecAgent repo). The tool searches upward from the current working directory to find it.
 
 ```json
 {
@@ -118,9 +231,9 @@ Create `backlog-2-spec.json` in the root of **your project** (not the Backlog2Sp
 }
 ```
 
-Required fields: `ado.organization`, `ado.project`, `project.name`. The `repoName` and `branch` fields are optional — when set, the tool fetches relevant source files from your repo and feeds them as context to the AI. The `devRulesFile` field is optional — see the section below.
+Required fields: `ado.organization`, `ado.project`, `project.name`. The `repoName` and `branch` fields are optional — when set, the tool fetches relevant source files from your ADO repo and uses them as context. The `devRulesFile` field is optional — see the [Project rules file](#project-rules-file) section.
 
-**Commit this file to your project repo.** It contains no secrets (only org name and project name). Committing it means every developer who clones your project gets the config automatically.
+**Commit this file to your project repo.** It contains no secrets.
 
 ```bash
 git add backlog-2-spec.json
@@ -129,50 +242,116 @@ git commit -m "add backlog-2-spec config"
 
 ---
 
-### Step 5 — Set secrets
+### Step 6 — Set secrets
 
-Credentials are stored via `dotnet user-secrets` — never in files. **Each developer must run this on their own machine.** Secrets are stored by the OS in a per-user location and are never shared or committed.
-
-Run these commands from inside the **Backlog2SpecAgent repo**:
+Credentials are stored via `dotnet user-secrets` — never in files. Each developer runs this on their own machine. Run from inside the **Backlog2SpecAgent repo**:
 
 ```bash
 cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
+```
 
-# Azure AI Foundry (recommended)
-dotnet user-secrets set "AzureAI:Endpoint"       "https://<name>.<region>.inference.ai.azure.com"
+#### Direct mode (default)
+
+```bash
+dotnet user-secrets set "AzureAI:Endpoint"       "https://<name>.cognitiveservices.azure.com/"
 dotnet user-secrets set "AzureAI:ApiKey"         "your-api-key"
 dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4o"
 dotnet user-secrets set "AzureAI:EndpointType"   "AzureFoundry"
 
-# Classic Azure OpenAI resource (omit AzureAI:EndpointType or set it to "AzureOpenAI")
-dotnet user-secrets set "AzureAI:Endpoint"       "https://your-resource.openai.azure.com"
-dotnet user-secrets set "AzureAI:ApiKey"         "your-api-key"
-dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4o"
-
-# Azure DevOps PAT (required regardless of endpoint type)
 dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
-
-# Azure AI Foundry Agent mode (optional — Phase 1 upgrade, see section below)
-dotnet user-secrets set "AzureAI:AgentName"      "backlog2spec-agent"
-dotnet user-secrets set "AzureAI:UseAgent"       "true"
 ```
 
-> **Migrating from a previous version?** The secret keys were renamed:
-> `AzureOpenAI:Endpoint` → `AzureAI:Endpoint`, `AzureOpenAI:ApiKey` → `AzureAI:ApiKey`, `AzureOpenAI:DeploymentName` → `AzureAI:DeploymentName`.
-> Re-run the `dotnet user-secrets set` commands above with the new names.
+> If you used the ARM template, copy the `aiServicesEndpoint`, `aiServicesKey`, and `gptDeploymentName` values from the deployment outputs directly.
+
+#### Agent mode (add these on top of Direct mode secrets)
+
+```bash
+dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"
+dotnet user-secrets set "AzureAI:UseAgent"  "true"
+```
+
+#### Tools API (add these if deploying Phase 2)
+
+```bash
+dotnet user-secrets set "AzureAI:ToolsBaseUrl" "https://your-tools-api.azurewebsites.net"
+dotnet user-secrets set "AzureAI:ToolsApiKey"  "your-shared-secret"
+```
+
+> **Migrating from a previous version?** The secret keys were renamed: `AzureOpenAI:*` → `AzureAI:*`. Re-run the commands above with the new names.
 
 ---
 
-### Step 6 — Verify the setup
+### Step 7 — Index your codebase for RAG (Phase 3)
 
-Before making any real ADO or AI calls, run a mock smoke test from inside **your project directory**:
+This step builds the Azure AI Search index that lets the agent retrieve grounded code snippets instead of guessing. Run it once after setup, and again whenever your codebase changes significantly.
+
+```powershell
+# From the Backlog2SpecAgent repo root
+.\scripts\index-repo.ps1 `
+    -SearchUrl  "https://<your-search>.search.windows.net" `
+    -SearchKey  "<admin-key>" `
+    -RepoPath   "C:\path\to\your-project"
+```
+
+> If you used the ARM template, copy `-SearchUrl` from the `searchEndpoint` output and `-SearchKey` from `searchAdminKey`.
+
+The script:
+- Recursively scans `.cs` and `.md` files; skips `bin/`, `obj/`, and `*.generated.cs`
+- Splits files into 300–500 line chunks at class/method and heading boundaries
+- Upserts chunks to an index named `repo-context` (created automatically on first run)
+- Is safe to re-run — existing documents are updated, not duplicated
+
+Typical run on a 50-file project takes under 30 seconds.
+
+---
+
+### Step 8 — Deploy the Tools API (Phase 2 only)
+
+> Skip this step if you are using Direct mode or Agent mode without tools.
+
+The Tools API is a self-contained ASP.NET Core app that the agent calls at runtime. Build it with Docker:
+
+```bash
+# From the repo root
+docker build -f src/Backlog2SpecAgent.Tools/Dockerfile . -t b2s-tools
+
+docker run -d -p 8080:8080 \
+  -e Ado__Organization="https://dev.azure.com/your-org" \
+  -e Ado__Project="YourProject" \
+  -e Ado__RepoName="YourRepo" \
+  -e Ado__Branch="main" \
+  -e Ado__Pat="your-ado-pat" \
+  -e Security__ApiKey="your-shared-secret" \
+  b2s-tools
+```
+
+Or run locally without Docker:
+
+```bash
+cd src/Backlog2SpecAgent.Tools
+dotnet run
+```
+
+The API must be reachable from Azure AI Foundry (i.e., publicly accessible or on the same VNet). Update the agent system prompt to instruct it to use tools (see the [Agent + Tools system prompt](#agent--tools-system-prompt) section).
+
+---
+
+### Step 9 — Verify
+
+Run a mock smoke test from inside **your project directory** (no Azure calls, no secrets required):
 
 ```bash
 cd path/to/your-project
 backlog-2-spec-agent spec 1 --mock
 ```
 
-This runs the full pipeline with no external calls. If it prints a spec, your config file is found and parsed correctly. Proceed to real usage only after this passes.
+This runs the full pipeline with stub implementations. If it prints a spec, your config file is found and parsed correctly.
+
+For a live test:
+
+```bash
+backlog-2-spec-agent spec 12345
+```
 
 ---
 
@@ -183,8 +362,6 @@ This runs the full pipeline with no external calls. If it prints a spec, your co
 ```bash
 backlog-2-spec-agent spec 12345
 ```
-
-Fetches work item #12345, enriches it, and prints the spec to the terminal.
 
 ### With verbose enrichment detail
 
@@ -213,8 +390,6 @@ backlog-2-spec-agent spec 12345 --raw | jq .goal
 backlog-2-spec-agent spec 12345 --mock
 ```
 
-Runs the full pipeline with mock implementations — no ADO or AI calls. Useful for testing config and output formatting.
-
 ### Export all specs for a Feature or Epic
 
 ```bash
@@ -222,9 +397,9 @@ backlog-2-spec-agent spec 12345 --feature
 backlog-2-spec-agent spec 12345 --epic
 ```
 
-Fetches the parent work item and all its children, generates a spec for each child, and writes them to a folder under `spec/<id>-<slug>/`. A `_summary.md` index file is also created with a table linking to each child spec.
+Fetches the parent work item and all its children, generates a spec for each, and writes them to `spec/<id>-<slug>/`. A `_summary.md` index file is also created.
 
-`--feature` and `--epic` are mutually exclusive. If the work item type does not match the flag used, the tool reports an error.
+`--feature` and `--epic` are mutually exclusive. If the work item type does not match, the tool reports an error.
 
 ---
 
@@ -234,13 +409,13 @@ Each generated spec contains five sections:
 
 | Section | Description |
 |---|---|
-| **Goal** | 1–3 sentences. The first states the capability being built; the others (optional) add outcome or non-obvious constraints. |
-| **Behaviour** | Plain-English bullets describing what the implementation must do, one per distinct behaviour. Written from the developer's perspective. |
+| **Goal** | 1–3 sentences. The first states the capability being built; the others add outcome or non-obvious constraints. |
+| **Behaviour** | Plain-English bullets describing what the implementation must do. Written from the developer's perspective. |
 | **Edge Cases** | Boundary conditions and failure scenarios the developer should handle. |
-| **Out of Scope** | Comma-separated list of things explicitly excluded from this work item. |
+| **Out of Scope** | Things explicitly excluded from this work item. |
 | **Files to Change** | File paths with a one-line description of what changes in each. Resolved from actual source files when codebase context is available. |
 
-Example output (console):
+Example output:
 
 ```
 ── Goal ─────────────────────────────────────────
@@ -275,7 +450,7 @@ The spec output format is designed to be pasted directly into GitHub Copilot Cha
 
 ### Single PBI
 
-Save the spec to a file with `--output`, then attach it in Copilot Chat and use:
+Save the spec with `--output`, then attach it in Copilot Chat and use:
 
 ```
 Implement the spec in the attached file.
@@ -283,11 +458,9 @@ Follow the "Files to Change" section exactly — only touch the listed files.
 Do not implement anything listed under "Out of Scope".
 ```
 
-Or paste the spec content inline and prepend the same instruction.
-
 ### Full feature (multiple PBIs)
 
-When you export a feature with `--feature` or `--epic`, a folder of spec files is created under `spec/<id>-<slug>/`. Give Copilot this prompt, replacing `<folder>` with the actual folder name:
+When you export a feature with `--feature` or `--epic`, a folder of spec files is created under `spec/<id>-<slug>/`. Use this prompt, replacing `<folder>`:
 
 ```
 Implement the following feature step by step.
@@ -306,190 +479,52 @@ Rules:
 Start with the feature spec, confirm your understanding of the goal, then begin PBI 01.
 ```
 
-> **Tip:** In Copilot Workspace you can attach all spec files directly — replace the file path references with *"use the attached spec files"* and omit the folder reference.
+> **Tip:** In Copilot Workspace you can attach all spec files directly — replace file path references with *"use the attached spec files"* and omit the folder reference.
 
 ---
 
 ## Project rules file
 
-The `devRulesFile` field in `backlog-2-spec.json` points to a markdown file that gets injected verbatim as a **Development Rules** section into both the enrichment and spec generation prompts.
+The `devRulesFile` field in `backlog-2-spec.json` points to a markdown file that gets injected verbatim into both the enrichment and spec generation prompts.
 
-Use it to encode team-specific constraints that the AI should always respect when analysing tickets and writing specs — things that are not expressible through the structured config fields.
+Use it to encode team-specific constraints the AI should always respect — things not expressible through the structured config fields.
 
-### When to use it
+### Good candidates
 
-Good candidates for the rules file:
+- Architectural constraints: *"never put business logic in controllers"*
+- Patterns that must be followed: *"always use the Result<T> pattern, never throw exceptions from services"*
+- Things to avoid: *"do not use AutoMapper — map manually"*
+- Layer ownership: *"the domain layer must not depend on infrastructure"*
+- Naming conventions too nuanced for a one-liner
 
-- Architectural constraints ("never put business logic in controllers")
-- Patterns that must be followed ("always use the Result<T> pattern, never throw exceptions from services")
-- Things to avoid ("do not use AutoMapper — map manually")
-- Layer ownership ("the domain layer must not depend on infrastructure")
-- Naming conventions too nuanced for a one-liner ("commands are named VerbNounCommand, handlers are VerbNounCommandHandler")
+### Setup
 
-### How to set it up
-
-1. Create the rules file in your project root (or anywhere — the path is resolved relative to `backlog-2-spec.json`):
+1. Create the file in your project root:
 
    ```markdown
    # dev-rules.md
 
-   - Never put business logic in controllers. Controllers only validate input, call a service, and return a response.
+   - Never put business logic in controllers.
    - All service methods return Result<T>. Never throw exceptions from the service layer.
-   - Do not use AutoMapper. All object mapping is done manually in dedicated mapper classes.
+   - Do not use AutoMapper. All mapping is done in dedicated mapper classes.
    - The domain layer must not reference any infrastructure or application layer types.
-   - Repository interfaces live in the domain layer; implementations live in the infrastructure layer.
-   - Commands and queries follow the MediatR pattern: VerbNounCommand / VerbNounQuery, handled by VerbNounCommandHandler / VerbNounQueryHandler.
+   - Repository interfaces live in the domain layer; implementations in the infrastructure layer.
+   - Commands and queries follow MediatR: VerbNounCommand / VerbNounCommandHandler.
    ```
 
 2. Reference it in `backlog-2-spec.json`:
 
    ```json
-   {
-     "devRulesFile": "dev-rules.md"
-   }
+   { "devRulesFile": "dev-rules.md" }
    ```
 
-   The path is relative to the config file. You can also use an absolute path or a subdirectory:
-
-   ```json
-   {
-     "devRulesFile": "docs/Backlog2SpecAgent-rules.md"
-   }
-   ```
-
-3. Commit both files:
-
-   ```bash
-   git add backlog-2-spec.json dev-rules.md
-   git commit -m "add Backlog2SpecAgent project rules"
-   ```
-
-### How it affects output
-
-When the rules file is set, both AI steps include a `## Development Rules` section built from its content:
-
-- **Enrichment** — the AI uses the rules when inferring affected components and identifying missing acceptance criteria, so it won't suggest components that violate your layering rules
-- **Spec generation** — the AI uses the rules when deciding which files to touch and how to describe the behaviour, so specs won't suggest patterns your team has explicitly ruled out
-
-If `devRulesFile` is not set, both steps run without any injected rules — the structured config fields (`architecture`, `naming`, etc.) still apply.
+3. Commit both files.
 
 ---
 
-## What you gain
+## Agent + Tools system prompt
 
-**Specs in minutes, not hours.** Writing a complete structured spec from scratch for a mid-size ticket easily takes 30–60 minutes. Backlog2SpecAgent does it in under a minute, with a result that already matches your project's naming conventions, test framework, and architecture.
-
-**Catches what tickets miss.** Most backlog items skip edge cases, have underspecified acceptance criteria, or leave ambiguities implicit. The enrichment step surfaces these explicitly — so the spec you get is already more thorough than what the ticket contained.
-
-**Grounded in your actual codebase.** When `repoName` is configured, the tool fetches files relevant to the ticket from your ADO repository and includes them as context. The generated spec references real file paths, existing class names, and the correct layer boundaries — not generic placeholders.
-
-**Optimised for AI coding assistants.** The output format (Goal + Behaviour + Files to Change) is designed to be pasted directly into GitHub Copilot or similar tools. Plain-English bullets and concrete file paths give the assistant high-signal, low-token context — more actionable than a BDD test spec.
-
-**Consistent across the team.** Every spec produced by the tool follows the same structure and style, regardless of who runs it. Pair it with the `devRulesFile` to encode your team's architectural decisions and have them applied automatically to every spec.
-
-**Scales to Features and Epics.** The `--feature` and `--epic` flags let you generate specs for every child work item in one command, with a summary index file linking them all together.
-
----
-
-## Mock mode
-
-```bash
-backlog-2-spec-agent spec 12345 --mock
-```
-
-Mock mode replaces every external dependency — ADO client, enrichment agent, spec generator — with fast stub implementations that return fixed data. No credentials are required and no network calls are made.
-
-Use it to:
-- Verify your `backlog-2-spec.json` config is found and parsed correctly
-- Test output formatting and rendering without waiting for real AI responses
-- Try the full pipeline in CI or on a machine without secrets configured
-
-Mock mode is detected at startup (before the DI container is built), so it works even if `AzureAI:*` secrets are not set.
-
----
-
-## Keeping the tool up to date
-
-When you pull changes from this repo, rebuild and reinstall:
-
-```bash
-cd path/to/Backlog2SpecAgent
-git pull
-dotnet pack src/Backlog2SpecAgent.Cli -o ./nupkg
-dotnet tool update --local --add-source ./nupkg Backlog2SpecAgent.Cli
-```
-
-Use `--global` instead of `--local` if you installed globally.
-
----
-
-## Troubleshooting
-
-| Error | Cause | Fix |
-|---|---|---|
-| `Configuration error: 'backlog-2-spec.json' not found` | No config file in CWD or any parent | Create `backlog-2-spec.json` in your project root |
-| `Missing required field: ado.organization` | Config file incomplete | Add the missing field |
-| `Configuration error: devRulesFile not found: '...'` | Path in `devRulesFile` does not exist | Check the path is relative to `backlog-2-spec.json` and the file exists |
-| `Authentication error: Failed to connect to Azure DevOps` | Invalid PAT or org URL | Re-set `Ado:Pat` and verify `ado.organization` |
-| `Authentication error: Authentication failed` | PAT expired or wrong scope | Generate a new PAT with Work Items: Read (and Code: Read if using repo context) |
-| `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
-| `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 5 |
-| `No manifest file found` | Missing `.config/dotnet-tools.json` in project | Run `dotnet new tool-manifest` in your project root, then reinstall |
-| `Unexpected error: AzureAI:AgentName secret is missing` | `UseAgent` is true but `AgentName` is not set | Run `dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"` |
-| `Agent 'backlog2spec-agent' not found` | Agent name does not match any agent in the portal | Check the agent name in [ai.azure.com](https://ai.azure.com) and update `AzureAI:AgentName` |
-
----
-
-## Azure AI Foundry Agent mode (Phase 2 — Tools API)
-
-Phase 2 adds real tool capabilities to the agent. Instead of the CLI pre-fetching work item data and passing it as a large payload, the agent calls two HTTP tools at runtime:
-
-| Tool | Endpoint | What it does |
-|---|---|---|
-| `get_work_item` | `GET /workitem/{id}` | Fetches the ADO work item by ID |
-| `repo_context` | `POST /repo-context` | Returns relevant source file snippets for a query |
-
-A third endpoint (`POST /spec`) lets the agent persist a generated spec to disk.
-
-### Step 1 — Deploy `Backlog2SpecAgent.Tools`
-
-The Tools API is a self-contained ASP.NET Core minimal API. Build and run it with Docker:
-
-```bash
-# From the repo root
-docker build -f src/Backlog2SpecAgent.Tools/Dockerfile . -t b2s-tools
-
-docker run -d -p 8080:8080 \
-  -e Ado__Organization="https://dev.azure.com/your-org" \
-  -e Ado__Project="YourProject" \
-  -e Ado__RepoName="YourRepo" \
-  -e Ado__Branch="main" \
-  -e Ado__Pat="your-ado-pat" \
-  -e Security__ApiKey="your-secret-key" \
-  b2s-tools
-```
-
-Or run locally without Docker:
-
-```bash
-cd src/Backlog2SpecAgent.Tools
-dotnet run
-```
-
-Set the following environment variables (or use `dotnet user-secrets` if running locally via the CLI project):
-
-| Variable | Description |
-|---|---|
-| `Ado__Organization` | Full ADO org URL, e.g. `https://dev.azure.com/your-org` |
-| `Ado__Project` | ADO project name |
-| `Ado__RepoName` | Repository name (optional — leave empty to skip repo context) |
-| `Ado__Branch` | Branch to search (default: `main`) |
-| `Ado__Pat` | Azure DevOps Personal Access Token |
-| `Security__ApiKey` | Shared secret used for the `X-Api-Key` header |
-
-### Step 2 — Update the agent system prompt
-
-In [ai.azure.com](https://ai.azure.com), update your agent's system prompt to reflect that it now fetches data via tools:
+When deploying Phase 2 (the Tools API), update the agent system prompt in [ai.azure.com](https://ai.azure.com) to instruct the agent to call tools rather than read from a pre-built payload:
 
 ```
 You are a senior software engineer generating production-ready structured specs
@@ -517,81 +552,54 @@ Rules:
 - Be complete: cover all edge cases implied by the ticket
 ```
 
-> The tool definitions (`get_work_item`, `repo_context`) are registered automatically by the CLI on first use — you do not need to add them in the portal.
-
-### Step 3 — Set CLI secrets for the Tools API
-
-```bash
-cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
-
-dotnet user-secrets set "AzureAI:ToolsBaseUrl"  "https://your-tools-api.azurewebsites.net"
-dotnet user-secrets set "AzureAI:ToolsApiKey"   "your-secret-key"
-dotnet user-secrets set "Security:ApiKey"        "your-secret-key"
-```
-
-Both `AzureAI:ToolsApiKey` and `Security:ApiKey` must match the value you set in the Tools API deployment.
+> The tool definitions are registered on the agent automatically by the CLI on first use — you do not need to add them in the portal.
 
 ---
 
-# Azure AI Foundry Agent mode (Phase 1)
-
-By default the tool calls the LLM directly for spec generation. Setting `AzureAI:UseAgent` to `true` routes spec generation through an Azure AI Foundry Agent instead, enabling you to iterate on the system prompt in the portal without touching code.
-
-### What changes
-
-- **Enrichment** — unchanged. Still runs as a direct LLM call via Semantic Kernel.
-- **Spec generation** — replaced by a call to your Foundry Agent. The agent receives all enrichment results, project config, dev rules, and codebase context as a structured JSON message and returns the spec JSON directly.
-
-### Step 1 — Create the agent in Azure AI Foundry portal
-
-1. Go to [ai.azure.com](https://ai.azure.com) → your project → **Agents** → **New agent**.
-2. Give it a name (e.g. `Backlog2Spec`).
-3. Paste the following system prompt:
-
-```
-You are a senior software engineer generating production-ready structured specs
-from Azure DevOps work items.
-
-You receive a JSON object with:
-  workItem:      the enriched ticket data (id, title, missingAcceptanceCriteria, edgeCases, constraints, affectedComponents, ambiguities)
-  projectConfig: stack, conventions, architecture
-  devRules:      (optional) team-specific architectural rules
-  repoContext:   (optional) relevant source file snippets
-
-Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
-{
-  "goal": "string",
-  "behaviour": ["string"],
-  "edgeCases": ["string"],
-  "outOfScope": ["string"],
-  "filesToChange": [{ "file": "string", "change": "string" }]
-}
-
-Rules:
-- Follow Clean Architecture principles
-- Respect devRules exactly — never suggest patterns listed as forbidden
-- Reference real file paths from repoContext when available
-- Be complete: cover all edge cases implied by the ticket
-```
-
-4. Select the same deployed model you use for the direct LLM path.
-5. Save the agent. The tool resolves the agent by name at runtime — you do not need to copy the agent ID.
-
-### Step 2 — Set secrets
+## Mock mode
 
 ```bash
-cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
-
-dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"
-dotnet user-secrets set "AzureAI:UseAgent"  "true"
+backlog-2-spec-agent spec 12345 --mock
 ```
 
-Use the exact name you gave the agent in the portal (case-sensitive). The existing `AzureAI:Endpoint` and `AzureAI:ApiKey` secrets are reused — no change needed.
+Mock mode replaces every external dependency — ADO client, enrichment agent, spec generator — with fast stub implementations that return fixed data. No credentials are required and no network calls are made.
 
-### Switching back
+Use it to:
+- Verify your `backlog-2-spec.json` config is found and parsed correctly
+- Test output formatting without waiting for AI responses
+- Try the full pipeline in CI or on a machine without secrets configured
 
-To revert to direct LLM calls, either remove `AzureAI:UseAgent` from user secrets or set it to `false`. No code change required.
+Mock mode is detected at startup (before the DI container is built), so it works even if `AzureAI:*` secrets are not set.
+
+---
+
+## Keeping the tool up to date
 
 ```bash
-dotnet user-secrets remove "AzureAI:UseAgent"
+cd path/to/Backlog2SpecAgent
+git pull
+dotnet pack src/Backlog2SpecAgent.Cli -o ./nupkg
+dotnet tool update --global --add-source ./nupkg Backlog2SpecAgent.Cli
 ```
+
+Use `--local` instead of `--global` if you installed locally. Re-run `scripts/index-repo.ps1` after a pull if the RAG index format has changed.
+
+---
+
+## Troubleshooting
+
+| Error | Cause | Fix |
+|---|---|---|
+| `Configuration error: 'backlog-2-spec.json' not found` | No config file in CWD or any parent | Create `backlog-2-spec.json` in your project root |
+| `Missing required field: ado.organization` | Config file incomplete | Add the missing field |
+| `Configuration error: devRulesFile not found: '...'` | Path in `devRulesFile` does not exist | Check the path is relative to `backlog-2-spec.json` |
+| `Authentication error: Failed to connect to Azure DevOps` | Invalid PAT or org URL | Re-set `Ado:Pat` and verify `ado.organization` |
+| `Authentication error: Authentication failed` | PAT expired or wrong scope | Generate a new PAT with Work Items: Read |
+| `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
+| `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 6 |
+| `No manifest file found` | Missing `.config/dotnet-tools.json` | Run `dotnet new tool-manifest` in your project root |
+| `Unexpected error: AzureAI:AgentName secret is missing` | `UseAgent` is true but `AgentName` not set | `dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"` |
+| `Agent 'backlog2spec-agent' not found` | Agent name mismatch | Check the agent name in [ai.azure.com](https://ai.azure.com) — it is case-sensitive |
+| `index-repo.ps1` fails with 401 | Wrong search key | Use the **admin key** from Azure AI Search → Settings → Keys |
+| `index-repo.ps1` fails with 404 on index creation | Search service not found | Check `-SearchUrl` matches your service name exactly |
+| GPT-4o deployment fails with `ModelNotFound` | Model not available in the selected region | Redeploy to `eastus`, `swedencentral`, or `australiaeast` |

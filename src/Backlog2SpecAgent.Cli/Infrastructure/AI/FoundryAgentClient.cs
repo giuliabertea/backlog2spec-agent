@@ -100,6 +100,9 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
 
         try
         {
+            // TODO Phase 3: RAG — query Azure AI Search (see scripts/index-repo.ps1) with
+            // keywords extracted from userMessage; prepend top-k matching code snippets as
+            // additional context before the user message so the agent has grounded context.
             await _client.CreateMessageAsync(thread.Id, MessageRole.User, userMessage, cancellationToken: ct);
 
             var run = (await _client.CreateRunAsync(thread.Id, new CreateRunOptions(agentId), ct)).Value;

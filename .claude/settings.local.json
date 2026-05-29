@@ -68,7 +68,8 @@
       "PowerShell(dotnet build \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\Backlog2SpecAgent.sln\" 2>&1)",
       "Bash(find \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\" -type d -name \"azure.ai.agents*\" | head -5)",
       "Read(//c/Users/gbert/.nuget/packages/**)",
-      "PowerShell(ls \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\\" -ErrorAction SilentlyContinue | Select-Object Name)"
+      "PowerShell(ls \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.openai.assistants\\\\\" -ErrorAction SilentlyContinue | Select-Object Name)",
+      "Bash(openspec list *)"
     ]
   }
 }
