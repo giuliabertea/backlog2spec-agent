@@ -152,24 +152,60 @@ function Initialize-Index {
     Write-Host "[index] '$IndexName' created."
 }
 
+function Escape-JsonString([string]$s) {
+    # Self-contained, dependency-free JSON string escaper.
+    # Works on PS 5.1 (.NET Framework) and PS 7 (.NET Core).
+    # ConvertTo-Json in PS 5.1 silently emits some control chars unescaped;
+    # JavaScriptSerializer is unavailable in .NET Core — so we build it ourselves.
+    $sb = [System.Text.StringBuilder]::new($s.Length + 32)
+    foreach ($c in $s.ToCharArray()) {
+        $n = [int][char]$c
+        switch ($n) {
+            34  { [void]$sb.Append('\"') }                              # "
+            92  { [void]$sb.Append('\\') }                              # \
+            8   { [void]$sb.Append('\b') }                              # backspace
+            9   { [void]$sb.Append('\t') }                              # tab
+            10  { [void]$sb.Append('\n') }                              # newline
+            12  { [void]$sb.Append('\f') }                              # form feed
+            13  { [void]$sb.Append('\r') }                              # carriage return
+            default {
+                if ($n -lt 32 -or $n -eq 127) {
+                    [void]$sb.Append('\u{0:x4}' -f $n)                  # other control chars
+                } else {
+                    [void]$sb.Append($c)
+                }
+            }
+        }
+    }
+    return $sb.ToString()
+}
+
 function ConvertTo-BatchJson([object[]]$Docs) {
-    # PowerShell 5.1's ConvertTo-Json does not escape all control characters
-    # (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F), which causes Azure Search
-    # to reject the request with "Invalid JSON / comma expected".
-    # JavaScriptSerializer (always available in .NET Framework) handles every edge case.
-    Add-Type -AssemblyName System.Web.Extensions -ErrorAction SilentlyContinue
-    $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
-    $ser.MaxJsonLength = [int]::MaxValue
-    return $ser.Serialize(@{ value = [object[]]$Docs })
+    $items = @(foreach ($d in $Docs) {
+        $parts = @(
+            '"@search.action":"' + (Escape-JsonString ([string]$d['@search.action'])) + '"'
+            '"id":"'             + (Escape-JsonString ([string]$d['id']))              + '"'
+            '"filePath":"'       + (Escape-JsonString ([string]$d['filePath']))        + '"'
+            '"content":"'        + (Escape-JsonString ([string]$d['content']))         + '"'
+            '"chunkIndex":'      + ([int]$d['chunkIndex'])
+            '"language":"'       + (Escape-JsonString ([string]$d['language']))        + '"'
+        )
+        '{' + ($parts -join ',') + '}'
+    })
+    return '{"value":[' + ($items -join ',') + ']}'
 }
 
 function Send-Batch([object[]]$Docs) {
     if (-not $Docs -or $Docs.Count -eq 0) { return }
 
-    $url  = "$SearchUrl/indexes/$IndexName/docs/index?api-version=$ApiVersion"
-    $body = ConvertTo-BatchJson $Docs
+    $url      = "$SearchUrl/indexes/$IndexName/docs/index?api-version=$ApiVersion"
+    $bodyStr  = ConvertTo-BatchJson $Docs
+    # Encode as UTF-8 bytes — Invoke-RestMethod on PS 5.1 uses the system code page
+    # for string bodies, which corrupts non-ASCII content in multi-byte source files.
+    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyStr)
 
-    $resp = Invoke-RestMethod -Uri $url -Method Post -Headers $script:HttpHeaders -Body $body
+    $resp = Invoke-RestMethod -Uri $url -Method Post -Headers $script:HttpHeaders `
+                              -Body $bodyBytes -ContentType 'application/json; charset=utf-8'
 
     foreach ($r in $resp.value) {
         if (-not $r.status) {
