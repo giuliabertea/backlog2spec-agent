@@ -152,11 +152,22 @@ function Initialize-Index {
     Write-Host "[index] '$IndexName' created."
 }
 
+function ConvertTo-BatchJson([object[]]$Docs) {
+    # PowerShell 5.1's ConvertTo-Json does not escape all control characters
+    # (U+0000–U+0008, U+000B, U+000C, U+000E–U+001F), which causes Azure Search
+    # to reject the request with "Invalid JSON / comma expected".
+    # JavaScriptSerializer (always available in .NET Framework) handles every edge case.
+    Add-Type -AssemblyName System.Web.Extensions -ErrorAction SilentlyContinue
+    $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $ser.MaxJsonLength = [int]::MaxValue
+    return $ser.Serialize(@{ value = [object[]]$Docs })
+}
+
 function Send-Batch([object[]]$Docs) {
     if (-not $Docs -or $Docs.Count -eq 0) { return }
 
     $url  = "$SearchUrl/indexes/$IndexName/docs/index?api-version=$ApiVersion"
-    $body = ConvertTo-Json -Depth 4 -Compress @{ value = $Docs }
+    $body = ConvertTo-BatchJson $Docs
 
     $resp = Invoke-RestMethod -Uri $url -Method Post -Headers $script:HttpHeaders -Body $body
 
@@ -223,11 +234,15 @@ foreach ($f in $files) {
     $fileCount++
 
     for ($i = 0; $i -lt $chunks.Count; $i++) {
+        # Strip control characters that are invalid unescaped in JSON
+        # (keeps \t 0x09, \n 0x0a, \r 0x0d; removes 0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f, 0x7f)
+        $content = [regex]::Replace($chunks[$i] -join "`n", '[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '')
+
         $batch.Add([ordered]@{
             '@search.action' = 'mergeOrUpload'
             'id'             = ConvertTo-DocId $rel $i
             'filePath'       = $rel
-            'content'        = ($chunks[$i] -join "`n")
+            'content'        = $content
             'chunkIndex'     = $i
             'language'       = $lang
         })
