@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Azure.AI.Agents.Persistent;
-using Azure.Core;
+using Azure.Identity;
 using Microsoft.Extensions.Logging;
 
 namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
@@ -43,13 +43,12 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
 
     public FoundryAgentClient(
         string projectEndpoint,
-        string apiKey,
         string agentName,
         string toolsBaseUrl,
         string toolsApiKey,
         ILogger<FoundryAgentClient> logger)
     {
-        _client = new PersistentAgentsClient(projectEndpoint, new ApiKeyTokenCredential(apiKey));
+        _client = new PersistentAgentsClient(projectEndpoint, new DefaultAzureCredential());
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _logger = logger;
 
@@ -210,21 +209,5 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
         var response = await _toolsHttp.PostAsync($"{_toolsBaseUrl}/repo-context", content, ct);
         return await response.Content.ReadAsStringAsync(ct);
-    }
-
-    // Forwards the API key as a bearer token, matching how Azure AI Foundry
-    // validates API key authentication on the project endpoint.
-    private sealed class ApiKeyTokenCredential : TokenCredential
-    {
-        private readonly AccessToken _token;
-
-        public ApiKeyTokenCredential(string apiKey)
-            => _token = new AccessToken(apiKey, DateTimeOffset.MaxValue);
-
-        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
-            => _token;
-
-        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
-            => ValueTask.FromResult(_token);
     }
 }

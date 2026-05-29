@@ -59,7 +59,7 @@ var host = Host.CreateDefaultBuilder(args)
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");
                 services.AddSingleton<IFoundryAgentClient>(sp =>
-                    new FoundryAgentClient(projectEndpoint, apiKey, agentName, toolsBaseUrl, toolsApiKey,
+                    new FoundryAgentClient(projectEndpoint, agentName, toolsBaseUrl, toolsApiKey,
                         sp.GetRequiredService<ILogger<FoundryAgentClient>>()));
                 services.AddSingleton<ISpecGeneratorAgent, FoundrySpecGeneratorAgent>();
             }
