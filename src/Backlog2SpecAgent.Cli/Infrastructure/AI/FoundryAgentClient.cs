@@ -45,6 +45,7 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         string projectEndpoint,
         string tenantId,
         string agentName,
+        string? agentId,
         string toolsBaseUrl,
         string toolsApiKey,
         ILogger<FoundryAgentClient> logger)
@@ -61,13 +62,11 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         _toolsHttp = new HttpClient();
         _toolsHttp.DefaultRequestHeaders.Add("X-Api-Key", toolsApiKey);
 
-        _agentIdResolver = new Lazy<Task<string>>(() => ResolveAndConfigureAgentAsync(agentName));
+        _agentIdResolver = new Lazy<Task<string>>(() => ResolveAndConfigureAgentAsync(agentId, agentName));
     }
 
-    private async Task<string> ResolveAndConfigureAgentAsync(string agentName)
+    private async Task<string> ResolveAndConfigureAgentAsync(string? agentId, string agentName)
     {
-        _logger.LogDebug("Resolving agent '{AgentName}' and registering tools", agentName);
-
         var tools = new List<ToolDefinition>
         {
             new FunctionToolDefinition(
@@ -80,6 +79,17 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
                 parameters: RepoContextParameters)
         };
 
+        if (!string.IsNullOrWhiteSpace(agentId))
+        {
+            _logger.LogWarning("Using agent ID directly: {AgentId}", agentId);
+            await _client.Administration.UpdateAgentAsync(
+                assistantId: agentId,
+                tools: tools,
+                cancellationToken: CancellationToken.None);
+            _logger.LogWarning("Registered tools on agent (id={AgentId})", agentId);
+            return agentId;
+        }
+
         _logger.LogWarning("Searching for agent: '{AgentName}'", agentName);
         await foreach (var agent in _client.Administration.GetAgentsAsync(cancellationToken: CancellationToken.None))
         {
@@ -90,7 +100,7 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
                 assistantId: agent.Id,
                 tools: tools,
                 cancellationToken: CancellationToken.None);
-            _logger.LogDebug("Registered tools on agent '{AgentName}' (id={AgentId})", agentName, agent.Id);
+            _logger.LogWarning("Registered tools on agent '{AgentName}' (id={AgentId})", agentName, agent.Id);
             return agent.Id;
         }
 
