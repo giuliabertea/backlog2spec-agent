@@ -76,8 +76,10 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
                 parameters: RepoContextParameters)
         };
 
+        _logger.LogWarning("Searching for agent: '{AgentName}'", agentName);
         await foreach (var agent in _client.Administration.GetAgentsAsync(cancellationToken: CancellationToken.None))
         {
+            _logger.LogWarning("Found agent: '{Name}' (id={Id})", agent.Name, agent.Id);
             if (agent.Name != agentName) continue;
 
             await _client.Administration.UpdateAgentAsync(
