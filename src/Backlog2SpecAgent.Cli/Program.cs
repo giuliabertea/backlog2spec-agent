@@ -85,6 +85,7 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddLogging(logging =>
         {
             logging.ClearProviders();
+            logging.AddConsole();
             logging.SetMinimumLevel(LogLevel.Warning);
         });
     })
