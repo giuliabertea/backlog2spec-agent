@@ -49,10 +49,14 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         string toolsApiKey,
         ILogger<FoundryAgentClient> logger)
     {
+        // New Foundry agents (ai.azure.com portal) require the services.ai.azure.com/api/projects/... endpoint.
+        // Hub-based endpoints (*.openai.azure.com) hit the classic Assistants backend and will not see Foundry agents.
         _client = new PersistentAgentsClient(projectEndpoint, new AzureCliCredential(
             new AzureCliCredentialOptions { TenantId = tenantId }));
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _logger = logger;
+
+        _logger.LogWarning("FoundryAgentClient initialised — endpoint: {Endpoint}", projectEndpoint);
 
         _toolsHttp = new HttpClient();
         _toolsHttp.DefaultRequestHeaders.Add("X-Api-Key", toolsApiKey);

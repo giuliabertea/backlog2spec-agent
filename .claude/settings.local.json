@@ -74,7 +74,11 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(gh api *)",
-      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(i['path']\\) for i in data.get\\('tree',[]\\) if 'AI.Agents.Persistent' in i.get\\('path',''\\) and i['path'].endswith\\('.cs'\\) and 'Sample7' in i['path']]\")"
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(i['path']\\) for i in data.get\\('tree',[]\\) if 'AI.Agents.Persistent' in i.get\\('path',''\\) and i['path'].endswith\\('.cs'\\) and 'Sample7' in i['path']]\")",
+      "WebSearch",
+      "WebFetch(domain:deepwiki.com)",
+      "PowerShell(Add-Type -Path \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\lib\\\\net8.0\\\\Azure.AI.Agents.Persistent.dll\"; [Azure.AI.Agents.Persistent.PersistentAgentsAudience] | Get-Member -Static | Where-Object { $_.MemberType -eq 'Property' } | Select-Object Name, Definition)",
+      "PowerShell($xmlFile = \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\azure.ai.agents.persistent.1.1.0.nupkg\"; if \\(Test-Path $xmlFile\\) { \"exists\" } else { Get-ChildItem \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\\" })"
     ]
   }
 }
