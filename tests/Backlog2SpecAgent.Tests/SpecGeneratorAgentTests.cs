@@ -1,9 +1,86 @@
+using Backlog2SpecAgent.Cli.Agents;
+using Backlog2SpecAgent.Cli.Infrastructure.AI;
+using Backlog2SpecAgent.Cli.Models;
+
 namespace Backlog2SpecAgent.Tests;
 
 public class SpecGeneratorAgentTests
 {
-    [Fact(Skip = "Not implemented — placeholder")]
-    public void GenerateAsync_ValidEnrichedTicket_ReturnsGeneratedSpec()
+    // --- MockSpecGeneratorAgent ---
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_ReturnsNonEmptyGoal()
     {
+        var agent = new MockSpecGeneratorAgent();
+        var spec = await agent.GenerateAsync(1);
+        Assert.False(string.IsNullOrWhiteSpace(spec.Goal));
+    }
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_ReturnsBehaviourItems()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        var spec = await agent.GenerateAsync(1);
+        Assert.NotEmpty(spec.Behaviour);
+    }
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_ReturnsEdgeCases()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        var spec = await agent.GenerateAsync(1);
+        Assert.NotEmpty(spec.EdgeCases);
+    }
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_ReturnsFilesToChange()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        var spec = await agent.GenerateAsync(1);
+        Assert.NotEmpty(spec.FilesToChange);
+    }
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_IsDeterministic()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        var a = await agent.GenerateAsync(1);
+        var b = await agent.GenerateAsync(99);
+        Assert.Equal(a.Goal, b.Goal);
+        Assert.Equal(a.OutOfScope, b.OutOfScope);
+    }
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_RespectsCancellation()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        // MockSpecGeneratorAgent is synchronous internally — it should complete fine even
+        // with a cancelled token because it never yields to the scheduler.
+        var spec = await agent.GenerateAsync(1, cts.Token);
+        Assert.NotNull(spec);
+    }
+
+    // --- MockFoundryAgentClient ---
+
+    [Fact]
+    public async Task MockFoundryAgentClient_ReturnsValidJson()
+    {
+        var client = new MockFoundryAgentClient();
+        var raw = await client.RunAsync("any input");
+        Assert.False(string.IsNullOrWhiteSpace(raw));
+        // Must be parseable as a GeneratedSpec-shaped JSON object
+        using var doc = System.Text.Json.JsonDocument.Parse(raw);
+        Assert.True(doc.RootElement.TryGetProperty("goal", out _));
+    }
+
+    [Fact]
+    public async Task MockFoundryAgentClient_IsDeterministic()
+    {
+        var client = new MockFoundryAgentClient();
+        var a = await client.RunAsync("msg1");
+        var b = await client.RunAsync("msg2");
+        Assert.Equal(a, b);
     }
 }

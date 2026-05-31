@@ -83,7 +83,9 @@
       "Bash(Get-ChildItem -Recurse -File)",
       "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\" -Recurse -File | Where-Object { $_.Extension -eq \".cs\" -or $_.Extension -eq \".csproj\" -or $_.Extension -eq \".json\" } | Select-Object FullName | Sort-Object FullName)",
       "Bash(Get-ChildItem -Path . -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\src\\\\Backlog2SpecAgent.Cli\\\\Agents\\\\MockEnrichmentAgent.cs\" -Force)",
+      "Bash(Remove-Item \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\src\\\\Backlog2SpecAgent.Cli\\\\Agents\\\\MockCodebaseContextAgent.cs\" -Force)"
     ]
   }
 }

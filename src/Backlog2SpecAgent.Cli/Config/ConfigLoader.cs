@@ -12,6 +12,14 @@ public sealed class ConfigLoader
         PropertyNameCaseInsensitive = true
     };
 
+    // startDirectory is used in tests; production code relies on the default (cwd).
+    private readonly string _startDirectory;
+
+    public ConfigLoader(string? startDirectory = null)
+    {
+        _startDirectory = startDirectory ?? Directory.GetCurrentDirectory();
+    }
+
     public async Task<AgentConfig> LoadAsync(CancellationToken ct = default)
     {
         var configPath = FindConfigFile();
@@ -49,9 +57,9 @@ public sealed class ConfigLoader
         config.DevRulesContent = await File.ReadAllTextAsync(rulesPath, ct);
     }
 
-    private static string? FindConfigFile()
+    private string? FindConfigFile()
     {
-        var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+        var dir = new DirectoryInfo(_startDirectory);
         while (dir is not null)
         {
             var candidate = Path.Combine(dir.FullName, ConfigFileName);

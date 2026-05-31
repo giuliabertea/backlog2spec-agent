@@ -9,12 +9,13 @@ namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
 // Endpoint: https://<resource>.openai.azure.com/openai
 // Auth: api-key header
 // API version: 2024-05-01-preview
-// TODO Phase 3: RAG — enrich the input with knowledge search results before calling.
 public sealed class FoundryAgentClient : IFoundryAgentClient
 {
     private const string ApiVersion = "2024-05-01-preview";
     private const int MaxRateLimitRetries = 3;
     private const int RateLimitRetryFallbackSeconds = 60;
+    private const int MaxPollCount = 150; // 5 minutes at 2s per poll
+    private const int CleanupTimeoutSeconds = 5;
 
     private readonly string _baseUrl;
     private readonly string _apiKey;
@@ -83,7 +84,8 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
             throw new InvalidOperationException($"POST /threads → {(int)resp.StatusCode}: {body}");
 
         using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.GetProperty("id").GetString()!;
+        return doc.RootElement.GetProperty("id").GetString()
+               ?? throw new InvalidOperationException("POST /threads returned a null thread id.");
     }
 
     private async Task AddMessageAsync(string threadId, string userMessage, CancellationToken ct)
@@ -110,12 +112,13 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
             throw new InvalidOperationException($"POST /threads/{threadId}/runs → {(int)resp.StatusCode}: {body}");
 
         using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.GetProperty("id").GetString()!;
+        return doc.RootElement.GetProperty("id").GetString()
+               ?? throw new InvalidOperationException($"POST /threads/{threadId}/runs returned a null run id.");
     }
 
     private async Task PollUntilCompleteAsync(string threadId, string runId, CancellationToken ct)
     {
-        while (true)
+        for (var poll = 0; poll < MaxPollCount; poll++)
         {
             await Task.Delay(TimeSpan.FromSeconds(2), ct);
 
@@ -144,6 +147,9 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
                 throw new InvalidOperationException($"Run {runId} ended with status '{status}': {errorMsg}");
             }
         }
+
+        throw new InvalidOperationException(
+            $"Run {runId} did not complete within {MaxPollCount * 2} seconds.");
     }
 
     private async Task<string> GetAssistantMessageAsync(string threadId, CancellationToken ct)
@@ -178,8 +184,9 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
     {
         try
         {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(CleanupTimeoutSeconds));
             using var req = BuildRequest(HttpMethod.Delete, $"threads/{threadId}");
-            await _http.SendAsync(req);
+            await _http.SendAsync(req, cts.Token);
             _logger.LogDebug("Deleted thread {ThreadId}", threadId);
         }
         catch (Exception ex)

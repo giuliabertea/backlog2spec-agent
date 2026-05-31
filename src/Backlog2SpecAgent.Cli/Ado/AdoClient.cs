@@ -39,14 +39,8 @@ public sealed class AdoClient : IAdoClient
         {
             workItem = await client.GetWorkItemAsync(config.Ado.Project, id, expand: WorkItemExpand.All, cancellationToken: ct);
         }
-        catch (Exception ex) when (ex.Message.Contains("does not exist") || ex.Message.Contains("not found") || ex.Message.Contains("TF401232") || ex.Message.Contains("VS403417"))
-        {
-            throw new AdoNotFoundException(id);
-        }
-        catch (Exception ex) when (ex.Message.Contains("unauthorized") || ex.Message.Contains("Unauthorized") || ex.Message.Contains("Access Denied"))
-        {
-            throw new AdoAuthException("Authentication failed. Verify your PAT has the required permissions.", ex);
-        }
+        catch (Exception ex) when (IsNotFoundError(ex)) { throw new AdoNotFoundException(id); }
+        catch (Exception ex) when (IsAuthError(ex)) { throw new AdoAuthException("Authentication failed. Verify your PAT has the required permissions.", ex); }
 
         return MapToDto(id, workItem);
     }
@@ -72,14 +66,8 @@ public sealed class AdoClient : IAdoClient
         {
             parent = await client.GetWorkItemAsync(config.Ado.Project, parentId, expand: WorkItemExpand.Relations, cancellationToken: ct);
         }
-        catch (Exception ex) when (ex.Message.Contains("does not exist") || ex.Message.Contains("not found") || ex.Message.Contains("TF401232") || ex.Message.Contains("VS403417"))
-        {
-            throw new AdoNotFoundException(parentId);
-        }
-        catch (Exception ex) when (ex.Message.Contains("unauthorized") || ex.Message.Contains("Unauthorized") || ex.Message.Contains("Access Denied"))
-        {
-            throw new AdoAuthException("Authentication failed. Verify your PAT has the required permissions.", ex);
-        }
+        catch (Exception ex) when (IsNotFoundError(ex)) { throw new AdoNotFoundException(parentId); }
+        catch (Exception ex) when (IsAuthError(ex)) { throw new AdoAuthException("Authentication failed. Verify your PAT has the required permissions.", ex); }
 
         var childIds = ExtractChildIds(parent);
         IReadOnlyList<WorkItemDto> children = [];
@@ -136,4 +124,12 @@ public sealed class AdoClient : IAdoClient
         doc.LoadHtml(html);
         return doc.DocumentNode.InnerText.Trim();
     }
+
+    private static bool IsNotFoundError(Exception ex) =>
+        ex.Message.Contains("does not exist") || ex.Message.Contains("not found") ||
+        ex.Message.Contains("TF401232") || ex.Message.Contains("VS403417");
+
+    private static bool IsAuthError(Exception ex) =>
+        ex.Message.Contains("unauthorized") || ex.Message.Contains("Unauthorized") ||
+        ex.Message.Contains("Access Denied");
 }
