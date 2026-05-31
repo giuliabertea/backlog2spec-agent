@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Backlog2SpecAgent.Cli.Config;
 using Backlog2SpecAgent.Cli.Infrastructure.AI;
 using Backlog2SpecAgent.Cli.Models;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
     };
 
     private readonly IFoundryAgentClient _agentClient;
+    private readonly ConfigLoader _configLoader;
     private readonly HttpClient _toolsHttp;
     private readonly string _toolsBaseUrl;
     private readonly HttpClient _searchHttp;
@@ -28,6 +30,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
 
     public FoundrySpecGeneratorAgent(
         IFoundryAgentClient agentClient,
+        ConfigLoader configLoader,
         string toolsBaseUrl,
         string toolsApiKey,
         string searchEndpoint,
@@ -36,6 +39,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         ILogger<FoundrySpecGeneratorAgent> logger)
     {
         _agentClient = agentClient;
+        _configLoader = configLoader;
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _toolsHttp = new HttpClient();
         _toolsHttp.DefaultRequestHeaders.Add("X-Api-Key", toolsApiKey);
@@ -57,10 +61,13 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         var title = ExtractTitle(workItemJson);
         var repoContext = await QueryAzureSearchAsync(title, ct);
 
-        // c. Build combined payload for the Foundry agent
-        var payload = BuildPayload(workItemJson, repoContext);
+        // c. Load project config (graceful fallback to defaults if no config file found)
+        var config = await _configLoader.LoadAsync(ct);
 
-        // d+e. Call the agent and parse the response, retrying on JSON errors
+        // d. Build combined payload for the Foundry agent
+        var payload = BuildPayload(workItemJson, repoContext, config);
+
+        // e+f. Call the agent and parse the response, retrying on JSON errors
         string lastRaw = string.Empty;
         JsonException? lastException = null;
 
@@ -160,19 +167,59 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         return string.Empty;
     }
 
-    private static string BuildPayload(string workItemJson, IReadOnlyList<RepoContextItem> repoContext)
+    private static string BuildPayload(string workItemJson, IReadOnlyList<RepoContextItem> repoContext, AgentConfig config)
     {
         using var doc = JsonDocument.Parse(workItemJson);
         var workItem = doc.RootElement.Clone();
 
         var mapped = repoContext.Select(r => new { file = r.File, content = r.Content }).ToArray();
+        var projectConfig = new
+        {
+            stack = BuildStack(config),
+            architecture = config.Project.Architecture,
+            conventions = BuildConventions(config)
+        };
+        var repoContextValue = mapped.Length > 0 ? (object?)mapped : null;
+
+        if (!string.IsNullOrWhiteSpace(config.DevRulesContent))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                workItem,
+                projectConfig,
+                devRules = config.DevRulesContent,
+                repoContext = repoContextValue
+            }, JsonOptions);
+        }
 
         return JsonSerializer.Serialize(new
         {
             workItem,
-            projectConfig = new { stack = ".NET 8, Clean Architecture" },
-            repoContext = mapped.Length > 0 ? (object?)mapped : null
-        });
+            projectConfig,
+            repoContext = repoContextValue
+        }, JsonOptions);
+    }
+
+    private static string BuildStack(AgentConfig config)
+    {
+        var parts = new[] { config.Project.Language, config.Project.Framework, config.Project.Architecture }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray();
+        return parts.Length > 0 ? string.Join(", ", parts) : ".NET 8, Clean Architecture";
+    }
+
+    private static string BuildConventions(AgentConfig config)
+    {
+        var parts = new[]
+            {
+                config.Conventions.Naming,
+                config.Conventions.DiPattern,
+                config.Conventions.FolderStructure,
+                config.Conventions.SpecStyle
+            }
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray();
+        return string.Join("; ", parts);
     }
 
     private static GeneratedSpec MapToGeneratedSpec(FoundrySpec foundrySpec) =>

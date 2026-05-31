@@ -15,6 +15,9 @@ public sealed class ConfigLoader
     public async Task<AgentConfig> LoadAsync(CancellationToken ct = default)
     {
         var configPath = FindConfigFile();
+        if (configPath is null)
+            return new AgentConfig();
+
         AgentConfig config;
         try
         {
@@ -46,7 +49,7 @@ public sealed class ConfigLoader
         config.DevRulesContent = await File.ReadAllTextAsync(rulesPath, ct);
     }
 
-    private static string FindConfigFile()
+    private static string? FindConfigFile()
     {
         var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (dir is not null)
@@ -57,9 +60,7 @@ public sealed class ConfigLoader
             dir = dir.Parent;
         }
 
-        throw new ConfigException(
-            $"'{ConfigFileName}' not found. Searched from '{Directory.GetCurrentDirectory()}' upward. " +
-            $"Create a '{ConfigFileName}' file in your project or any ancestor directory.");
+        return null;
     }
 
     private static void ValidateRequiredFields(AgentConfig config)

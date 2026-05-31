@@ -70,6 +70,7 @@ var host = Host.CreateDefaultBuilder(args)
                 services.AddSingleton<ISpecGeneratorAgent>(sp =>
                     new FoundrySpecGeneratorAgent(
                         sp.GetRequiredService<IFoundryAgentClient>(),
+                        sp.GetRequiredService<ConfigLoader>(),
                         toolsBaseUrl, toolsApiKey,
                         searchEndpoint, searchApiKey, searchIndexName,
                         sp.GetRequiredService<ILogger<FoundrySpecGeneratorAgent>>()));
