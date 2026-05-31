@@ -19,8 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.AI.Agents.Persistent" Version="1.1.0" />
-    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+<PackageReference Include="Azure.Identity" Version="1.13.2" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.75.0" />

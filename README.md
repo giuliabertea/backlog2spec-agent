@@ -130,7 +130,7 @@ Use the ARM template above (recommended) **or** create the resources manually:
 > Skip this step if you are using **Direct mode** (the default). You can always add Agent mode later.
 
 1. Go to [ai.azure.com](https://ai.azure.com) → your project → **Agents** → **New agent**.
-2. Name it exactly `backlog2spec-agent` (the CLI resolves agents by name).
+2. Name it (e.g. `backlog2spec-agent`) and note the **Agent ID** shown in the portal — you will set it as `AzureAI:AgentId` in Step 6.
 3. Paste this system prompt:
 
 ```
@@ -266,9 +266,16 @@ dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
 #### Agent mode (add these on top of Direct mode secrets)
 
 ```bash
-dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"
-dotnet user-secrets set "AzureAI:UseAgent"  "true"
+dotnet user-secrets set "AzureAI:UseAgent"          "true"
+dotnet user-secrets set "AzureAI:ProjectEndpoint"   "https://<hub-resource>.services.ai.azure.com/api/projects/<project-name>"
+dotnet user-secrets set "AzureAI:TenantId"          "your-tenant-id"
+dotnet user-secrets set "AzureAI:AgentName"         "backlog2spec-agent"
+dotnet user-secrets set "AzureAI:AgentId"           "your-agent-id"
 ```
+
+> `AzureAI:ProjectEndpoint` must use the `services.ai.azure.com/api/projects/...` format — this is the new Azure AI Foundry endpoint. Hub-based (`*.openai.azure.com`) endpoints hit the classic Assistants backend and will not work.
+> `AzureAI:AgentId` is the ID shown in the Foundry portal under the agent's details. `AzureAI:AgentName` is used as a fallback ID if `AzureAI:AgentId` is not set.
+> Auth uses your `az login` session (`AzureCliCredential`). Run `az login --tenant your-tenant-id` before using the tool in Agent mode.
 
 #### Tools API (add these if deploying Phase 2)
 
@@ -599,7 +606,9 @@ Use `--local` instead of `--global` if you installed locally. Re-run `scripts/in
 | `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 6 |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` | Run `dotnet new tool-manifest` in your project root |
 | `Unexpected error: AzureAI:AgentName secret is missing` | `UseAgent` is true but `AgentName` not set | `dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"` |
-| `Agent 'backlog2spec-agent' not found` | Agent name mismatch | Check the agent name in [ai.azure.com](https://ai.azure.com) — it is case-sensitive |
+| `Unexpected error: AzureAI:ProjectEndpoint secret is missing` | `UseAgent` is true but `ProjectEndpoint` not set | Set `AzureAI:ProjectEndpoint` to your `services.ai.azure.com/api/projects/...` URL |
+| `Foundry API POST /threads → 401` | Wrong token scope or tenant | Run `az login --tenant your-tenant-id`; verify `AzureAI:TenantId` is correct |
+| `Foundry API POST /threads/…/runs → 404` | Wrong agent ID | Copy the agent ID from the Foundry portal and set `AzureAI:AgentId` |
 | `index-repo.ps1` fails with 401 | Wrong search key | Use the **admin key** from Azure AI Search → Settings → Keys |
 | `index-repo.ps1` fails with 404 on index creation | Search service not found | Check `-SearchUrl` matches your service name exactly |
 | GPT-4o deployment fails with `ModelNotFound` | Model not available in the selected region | Redeploy to `eastus`, `swedencentral`, or `australiaeast` |

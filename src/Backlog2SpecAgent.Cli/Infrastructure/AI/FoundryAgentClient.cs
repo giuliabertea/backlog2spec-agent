@@ -1,45 +1,31 @@
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Azure.AI.Agents.Persistent;
+using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 
 namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
 
-// Wraps the Azure AI Agents Persistent API (via Azure AI Foundry project endpoint).
+// Wraps the Azure AI Foundry Agents REST API (2025-05-15-preview) via direct HttpClient calls.
 // Tools (get_work_item, repo_context) are registered on the agent at first use
 // and executed locally by forwarding HTTP calls to the Backlog2SpecAgent.Tools API.
 // TODO Phase 3: RAG — trigger knowledge search before creating the thread.
 public sealed class FoundryAgentClient : IFoundryAgentClient
 {
     private static readonly TimeSpan PollingInterval = TimeSpan.FromSeconds(2);
+    private const string ApiVersion = "2025-05-15-preview";
 
-    private static readonly BinaryData GetWorkItemParameters = BinaryData.FromString("""
-        {
-            "type": "object",
-            "properties": {
-                "id": { "type": "string", "description": "Azure DevOps work item ID" }
-            },
-            "required": ["id"]
-        }
-        """);
+    private readonly string _baseUrl;
+    private readonly string _agentId;
+    private readonly TokenCredential _credential;
+    // Azure AI Foundry uses the ai.azure.com audience.
+    private static readonly string[] TokenScopes = ["https://ai.azure.com/.default"];
 
-    private static readonly BinaryData RepoContextParameters = BinaryData.FromString("""
-        {
-            "type": "object",
-            "properties": {
-                "query": { "type": "string", "description": "Search query to find relevant source code files" }
-            },
-            "required": ["query"]
-        }
-        """);
-
-    private readonly PersistentAgentsClient _client;
+    private readonly HttpClient _agentHttp;
     private readonly string _toolsBaseUrl;
     private readonly HttpClient _toolsHttp;
     private readonly ILogger<FoundryAgentClient> _logger;
-    // Resolved once on first use and cached for the lifetime of this singleton.
-    private readonly Lazy<Task<string>> _agentIdResolver;
 
     public FoundryAgentClient(
         string projectEndpoint,
@@ -50,147 +36,162 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         string toolsApiKey,
         ILogger<FoundryAgentClient> logger)
     {
-        // New Foundry agents (ai.azure.com portal) require the services.ai.azure.com/api/projects/... endpoint.
-        // Hub-based endpoints (*.openai.azure.com) hit the classic Assistants backend and will not see Foundry agents.
-        _client = new PersistentAgentsClient(projectEndpoint, new AzureCliCredential(
-            new AzureCliCredentialOptions { TenantId = tenantId }));
+        _baseUrl = projectEndpoint.TrimEnd('/');
+        _agentId = !string.IsNullOrWhiteSpace(agentId) ? agentId : agentName;
+        _credential = new AzureCliCredential(new AzureCliCredentialOptions { TenantId = tenantId });
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _logger = logger;
 
-        _logger.LogWarning("FoundryAgentClient initialised — endpoint: {Endpoint}", projectEndpoint);
-
+        _agentHttp = new HttpClient();
         _toolsHttp = new HttpClient();
         _toolsHttp.DefaultRequestHeaders.Add("X-Api-Key", toolsApiKey);
 
-        _agentIdResolver = new Lazy<Task<string>>(() => ResolveAndConfigureAgentAsync(agentId, agentName));
+        _logger.LogWarning("FoundryAgentClient initialised — endpoint: {Endpoint}, agentId: {AgentId}",
+            _baseUrl, _agentId);
     }
 
-    private async Task<string> ResolveAndConfigureAgentAsync(string? agentId, string agentName)
+    private async Task<string> GetTokenAsync(CancellationToken ct)
     {
-        var tools = new List<ToolDefinition>
-        {
-            new FunctionToolDefinition(
-                name: "get_work_item",
-                description: "Fetches an Azure DevOps work item by ID and returns its title, type, description, and acceptance criteria as JSON.",
-                parameters: GetWorkItemParameters),
-            new FunctionToolDefinition(
-                name: "repo_context",
-                description: "Fetches relevant source code file snippets from the repository for a given search query. Returns a list of { path, content } objects.",
-                parameters: RepoContextParameters)
-        };
+        var token = await _credential.GetTokenAsync(new TokenRequestContext(TokenScopes), ct);
+        return token.Token;
+    }
 
-        if (!string.IsNullOrWhiteSpace(agentId))
-        {
-            _logger.LogWarning("Using agent ID directly: {AgentId}", agentId);
-            await _client.Administration.UpdateAgentAsync(
-                assistantId: agentId,
-                tools: tools,
-                cancellationToken: CancellationToken.None);
-            _logger.LogWarning("Registered tools on agent (id={AgentId})", agentId);
-            return agentId;
-        }
+    private async Task<HttpRequestMessage> BuildAsync(
+        HttpMethod method, string path, object? body, CancellationToken ct)
+    {
+        var token = await GetTokenAsync(ct);
+        var req = new HttpRequestMessage(method, $"{_baseUrl}/{path}?api-version={ApiVersion}");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (body is not null)
+            req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        return req;
+    }
 
-        _logger.LogWarning("Searching for agent: '{AgentName}'", agentName);
-        await foreach (var agent in _client.Administration.GetAgentsAsync(cancellationToken: CancellationToken.None))
-        {
-            _logger.LogWarning("Found agent: '{Name}' (id={Id})", agent.Name, agent.Id);
-            if (agent.Name != agentName) continue;
-
-            await _client.Administration.UpdateAgentAsync(
-                assistantId: agent.Id,
-                tools: tools,
-                cancellationToken: CancellationToken.None);
-            _logger.LogWarning("Registered tools on agent '{AgentName}' (id={AgentId})", agentName, agent.Id);
-            return agent.Id;
-        }
-
-        throw new InvalidOperationException(
-            $"Agent '{agentName}' not found in Azure AI Foundry. Check AzureAI:AgentName in config.");
+    private async Task<JsonDocument> SendAsync(HttpRequestMessage req, CancellationToken ct)
+    {
+        var resp = await _agentHttp.SendAsync(req, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                $"Foundry API {req.Method} {req.RequestUri?.PathAndQuery} → {(int)resp.StatusCode}: {body}");
+        return JsonDocument.Parse(body);
     }
 
     public async Task<string> RunAsync(string userMessage, CancellationToken ct = default)
     {
-        var agentId = await _agentIdResolver.Value;
-
-        PersistentAgentThread thread = (await _client.Threads.CreateThreadAsync(cancellationToken: ct)).Value;
-        _logger.LogDebug("Created thread {ThreadId}", thread.Id);
+        // Create thread
+        using var threadDoc = await SendAsync(
+            await BuildAsync(HttpMethod.Post, "threads", new { }, ct), ct);
+        var threadId = threadDoc.RootElement.GetProperty("id").GetString()!;
+        _logger.LogDebug("Created thread {ThreadId}", threadId);
 
         try
         {
-            // TODO Phase 3: RAG — query Azure AI Search (see scripts/index-repo.ps1) with
-            // keywords extracted from userMessage; prepend top-k matching code snippets as
-            // additional context before the user message so the agent has grounded context.
-            await _client.Messages.CreateMessageAsync(thread.Id, MessageRole.User, userMessage, cancellationToken: ct);
+            // Add user message
+            using var _ = await SendAsync(
+                await BuildAsync(HttpMethod.Post, $"threads/{threadId}/messages",
+                    new { role = "user", content = userMessage }, ct), ct);
 
-            ThreadRun run = (await _client.Runs.CreateRunAsync(thread.Id, agentId, cancellationToken: ct)).Value;
-            _logger.LogDebug("Started run {RunId} on thread {ThreadId}", run.Id, thread.Id);
+            // Create run
+            using var runDoc = await SendAsync(
+                await BuildAsync(HttpMethod.Post, $"threads/{threadId}/runs",
+                    new { agent_id = _agentId }, ct), ct);
+            var runId = runDoc.RootElement.GetProperty("id").GetString()!;
+            var status = runDoc.RootElement.GetProperty("status").GetString()!;
+            _logger.LogDebug("Started run {RunId} on thread {ThreadId}", runId, threadId);
 
-            run = await PollToCompletionAsync(thread.Id, run, ct);
+            status = await PollToCompletionAsync(threadId, runId, status, ct);
 
-            if (run.Status != RunStatus.Completed)
-                throw new InvalidOperationException(
-                    $"Agent run ended with status '{run.Status}': {run.LastError?.Message}");
+            if (status != "completed")
+                throw new InvalidOperationException($"Agent run ended with status '{status}'");
 
-            await foreach (var msg in _client.Messages.GetMessagesAsync(
-                threadId: thread.Id,
-                order: ListSortOrder.Descending,
-                cancellationToken: ct))
+            // Get messages (newest first)
+            using var msgsDoc = await SendAsync(
+                await BuildAsync(HttpMethod.Get, $"threads/{threadId}/messages", null, ct), ct);
+
+            foreach (var msg in msgsDoc.RootElement.GetProperty("data").EnumerateArray())
             {
-                if (msg.Role != MessageRole.Agent) continue;
-                var textParts = msg.ContentItems.OfType<MessageTextContent>().Select(c => c.Text);
-                return string.Concat(textParts);
+                if (msg.GetProperty("role").GetString() != "assistant") continue;
+                var sb = new StringBuilder();
+                foreach (var part in msg.GetProperty("content").EnumerateArray())
+                {
+                    if (part.GetProperty("type").GetString() != "text") continue;
+                    sb.Append(part.GetProperty("text").GetProperty("value").GetString());
+                }
+                return sb.ToString();
             }
+
             return string.Empty;
         }
         finally
         {
-            try { await _client.Threads.DeleteThreadAsync(threadId: thread.Id, cancellationToken: CancellationToken.None); }
+            try
+            {
+                var del = await BuildAsync(HttpMethod.Delete, $"threads/{threadId}", null, CancellationToken.None);
+                await _agentHttp.SendAsync(del, CancellationToken.None);
+            }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to delete thread {ThreadId}", thread.Id);
+                _logger.LogWarning(ex, "Failed to delete thread {ThreadId}", threadId);
             }
         }
     }
 
-    private async Task<ThreadRun> PollToCompletionAsync(string threadId, ThreadRun run, CancellationToken ct)
+    private async Task<string> PollToCompletionAsync(
+        string threadId, string runId, string status, CancellationToken ct)
     {
         while (true)
         {
-            switch (run.Status.ToString())
+            switch (status)
             {
                 case "completed":
                 case "failed":
                 case "cancelled":
                 case "expired":
-                    return run;
+                    return status;
 
                 case "requires_action":
-                    run = await HandleToolCallsAsync(run, ct);
+                    status = await HandleToolCallsAsync(threadId, runId, ct);
                     break;
 
                 default: // queued, in_progress
                     await Task.Delay(PollingInterval, ct);
-                    run = (await _client.Runs.GetRunAsync(threadId, run.Id, ct)).Value;
+                    using (var runDoc = await SendAsync(
+                        await BuildAsync(HttpMethod.Get, $"threads/{threadId}/runs/{runId}", null, ct), ct))
+                    {
+                        status = runDoc.RootElement.GetProperty("status").GetString()!;
+                    }
                     break;
             }
         }
     }
 
-    private async Task<ThreadRun> HandleToolCallsAsync(ThreadRun run, CancellationToken ct)
+    private async Task<string> HandleToolCallsAsync(string threadId, string runId, CancellationToken ct)
     {
-        if (run.RequiredAction is not SubmitToolOutputsAction submitAction)
-            throw new InvalidOperationException($"Unexpected required action type: {run.RequiredAction?.GetType().Name}");
+        using var runDoc = await SendAsync(
+            await BuildAsync(HttpMethod.Get, $"threads/{threadId}/runs/{runId}", null, ct), ct);
 
-        var outputs = new List<ToolOutput>();
-        foreach (var call in submitAction.ToolCalls)
+        var toolCalls = runDoc.RootElement
+            .GetProperty("required_action")
+            .GetProperty("submit_tool_outputs")
+            .GetProperty("tool_calls");
+
+        var outputs = new List<object>();
+        foreach (var call in toolCalls.EnumerateArray())
         {
-            if (call is not RequiredFunctionToolCall fn) continue;
-            _logger.LogDebug("Executing tool '{ToolName}' with args: {Args}", fn.Name, fn.Arguments);
-            var result = await ExecuteToolAsync(fn.Name, fn.Arguments, ct);
-            outputs.Add(new ToolOutput(fn.Id, result));
+            var callId = call.GetProperty("id").GetString()!;
+            var fn = call.GetProperty("function");
+            var name = fn.GetProperty("name").GetString()!;
+            var arguments = fn.GetProperty("arguments").GetString()!;
+            _logger.LogDebug("Executing tool '{ToolName}' with args: {Args}", name, arguments);
+            var result = await ExecuteToolAsync(name, arguments, ct);
+            outputs.Add(new { tool_call_id = callId, output = result });
         }
 
-        return (await _client.Runs.SubmitToolOutputsToRunAsync(run, outputs, ct)).Value;
+        using var submitDoc = await SendAsync(
+            await BuildAsync(HttpMethod.Post, $"threads/{threadId}/runs/{runId}/submit_tool_outputs",
+                new { tool_outputs = outputs }, ct), ct);
+        return submitDoc.RootElement.GetProperty("status").GetString()!;
     }
 
     private async Task<string> ExecuteToolAsync(string toolName, string argumentsJson, CancellationToken ct)
@@ -198,7 +199,6 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         try
         {
             using var args = JsonDocument.Parse(argumentsJson);
-
             return toolName switch
             {
                 "get_work_item" => await CallGetWorkItemAsync(args.RootElement, ct),
