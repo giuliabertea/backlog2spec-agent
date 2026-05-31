@@ -95,7 +95,7 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
             // Create run
             using var runDoc = await SendAsync(
                 await BuildAsync(HttpMethod.Post, $"threads/{threadId}/runs",
-                    new { agent_id = _agentId }, ct), ct);
+                    new { assistant_id = _agentId }, ct), ct);
             var runId = runDoc.RootElement.GetProperty("id").GetString()!;
             var status = runDoc.RootElement.GetProperty("status").GetString()!;
             _logger.LogDebug("Started run {RunId} on thread {ThreadId}", runId, threadId);
