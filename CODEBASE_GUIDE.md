@@ -112,11 +112,13 @@ Ado:Pat                 → Azure DevOps Personal Access Token
 Agent mode (add these):
 ```
 AzureAI:UseAgent        → "true"
-AzureAI:ProjectEndpoint → Foundry project URL (services.ai.azure.com/api/projects/...)
-AzureAI:TenantId        → Azure tenant ID
-AzureAI:AgentId         → Agent ID from the Foundry portal
+AzureAI:ProjectEndpoint → Azure OpenAI base URL (https://<resource>.openai.azure.com/openai)
+AzureAI:AgentId         → Assistant ID from Azure OpenAI Studio
 AzureAI:ToolsBaseUrl    → HTTP endpoint of the Tools API
 AzureAI:ToolsApiKey     → Shared secret for the Tools API
+AzureSearch:Endpoint    → Azure AI Search service URL (https://<name>.search.windows.net)
+AzureSearch:ApiKey      → Azure AI Search admin key
+AzureSearch:IndexName   → Index name (default: "codebase-chunks")
 ```
 Set via: `dotnet user-secrets set "AzureAI:Endpoint" "https://..."`
 
@@ -174,8 +176,10 @@ load prompt template → fill variables → call LLM → parse JSON → retry up
 
 **`FoundrySpecGeneratorAgent.cs`** — Agent-mode spec generation
 - Used when `AzureAI:UseAgent = true` (replaces the two-step `EnrichmentAgent` + `SpecGeneratorAgent` pipeline)
-- Calls the Tools API `GET /workitem/{id}` and `POST /repo-context` directly using `toolsBaseUrl` and `toolsApiKey`
-- Builds a single JSON payload `{ workItem, projectConfig, repoContext }` and sends it to `FoundryAgentClient.RunAsync()`
+- Calls the Tools API `GET /workitem/{id}` (`X-Api-Key` auth) to fetch the work item
+- Queries Azure AI Search directly: `POST {searchEndpoint}/indexes/{indexName}/docs/search` with the work item title as the query; returns up to 5 `{ filePath, content }` chunks
+- Builds a single JSON payload `{ workItem, projectConfig, repoContext: [{ file, content }] }` and sends it to `FoundryAgentClient.RunAsync()`
+- Search failures are non-fatal: the pipeline continues with `repoContext: null`
 - Parses the JSON response into `GeneratedSpec`, retrying up to 2 times on JSON errors
 
 **`CodebaseContextAgent.cs`** — Codebase file fetcher
@@ -340,11 +344,18 @@ SpecCommand.ExecuteAsync()
 │
 └── FoundrySpecGeneratorAgent.GenerateAsync(workItemId)
       ├── GET {ToolsBaseUrl}/workitem/{id}  (X-Api-Key header) → workItemJson
-      ├── POST {ToolsBaseUrl}/repo-context  (X-Api-Key header, query = title) → repoContextJson
+      ├── POST {SearchEndpoint}/indexes/{IndexName}/docs/search  (api-key header)
+      │     body: { search: <title>, select: "filePath,content", top: 5 }
+      │     → repoContext: [{ file, content }]  (empty list on failure — non-fatal)
       ├── Build payload: { workItem, projectConfig, repoContext }
       ├── FoundryAgentClient.RunAsync(payload)
-      │     └── POST {ProjectEndpoint}/responses?api-version=... → response text
-      │         (Bearer token via AzureCliCredential)
+      │     ├── POST {ProjectEndpoint}/threads           → threadId
+      │     ├── POST /threads/{threadId}/messages        → (user message added)
+      │     ├── POST /threads/{threadId}/runs            → runId
+      │     ├── GET  /threads/{threadId}/runs/{runId}    (poll every 2s until completed/failed)
+      │     ├── GET  /threads/{threadId}/messages        → first assistant message text
+      │     └── DELETE /threads/{threadId}               (cleanup)
+      │         (all calls use api-key header)
       └── Parse JSON → GeneratedSpec
           (retry up to 2x on JSON parse failure)
 ```
@@ -429,14 +440,23 @@ All domain errors are typed exceptions rather than generic `Exception`. This all
 - **Model:** deployment name configured as `AzureAI:DeploymentName` (typically `gpt-4o`)
 - **Settings:** temperature = 0.1, no streaming — each agent call is a single `GetChatMessageContentsAsync()` call
 
-### Azure AI Foundry Responses API (Agent mode)
+### Azure OpenAI Assistants API (Agent mode)
 
-- **No SDK** — direct `HttpClient` calls to the Responses REST API (`2025-05-15-preview`)
-- **Auth:** `AzureCliCredential` (requires `az login --tenant <tenantId>`) with scope `https://ai.azure.com/.default`
-- **Endpoint:** `POST {AzureAI:ProjectEndpoint}/responses?api-version=2025-05-15-preview`
-- **Request body:** `{ "model": "<agentId>", "input": "<payload>" }`
-- **Response parsing:** reads `output_text` (convenience field) or traverses `output[].content[].text`
-- **Tools API:** `FoundrySpecGeneratorAgent` calls `GET /workitem/{id}` and `POST /repo-context` on `AzureAI:ToolsBaseUrl` with `X-Api-Key` auth before invoking the Foundry agent
+- **No SDK** — direct `HttpClient` calls to the classic Assistants REST API (`2024-05-01-preview`)
+- **Auth:** `api-key` header using `AzureAI:ApiKey` (same key as Direct mode — no separate credential)
+- **Base URL:** `AzureAI:ProjectEndpoint` — must be `https://<resource>.openai.azure.com/openai`
+- **Flow:** create thread → add user message → create run → poll until completed/failed → read messages → delete thread
+- **Response parsing:** traverses `data[].content[].text.value` from the messages list; returns the first assistant message
+- **Tools API:** `FoundrySpecGeneratorAgent` calls `GET /workitem/{id}` on `AzureAI:ToolsBaseUrl` with `X-Api-Key` auth before invoking the assistant
+
+### Azure AI Search (Agent mode)
+
+- **No SDK** — direct `HttpClient` call to the Search REST API (`2023-11-01`)
+- **Auth:** `api-key` header using `AzureSearch:ApiKey`
+- **Endpoint:** `POST {AzureSearch:Endpoint}/indexes/{AzureSearch:IndexName}/docs/search`
+- **Request body:** `{ "search": "<work item title>", "select": "filePath,content", "top": 5 }`
+- **Response:** `value[]` array of `{ filePath, content }` objects — mapped to `repoContext` in the agent payload
+- **Failure mode:** any HTTP error or parse failure is logged as a warning and the pipeline continues without repo context
 
 ### Spectre.Console
 
@@ -478,7 +498,7 @@ All domain errors are typed exceptions rather than generic `Exception`. This all
 
 ### Common gotchas
 
-**`--mock` must come before argument parsing reads secrets.** The flag is pre-scanned with `args.Contains("--mock")` before System.CommandLine runs, because secret loading happens during DI setup — before the command handler would normally read its options.
+**`--mock` must come before argument parsing reads secrets.** The flag is pre-scanned with `args.Contains("--mock")` before System.CommandLine runs, because secret loading (including `AzureAI:ApiKey`, `AzureSearch:*`, etc.) happens during DI setup — before the command handler would normally read its options.
 
 **Config is searched upward from CWD, not the binary location.** If you run the tool from the wrong directory and don't have a `backlog-2-spec.json` in the path, it will throw `ConfigException`. This surprises users who install the global tool and run it from an unrelated directory.
 

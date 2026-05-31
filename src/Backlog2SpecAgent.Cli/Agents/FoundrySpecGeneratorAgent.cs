@@ -10,6 +10,7 @@ namespace Backlog2SpecAgent.Cli.Agents;
 public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
 {
     private const int MaxRetries = 2;
+    private const string SearchApiVersion = "2023-11-01";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -20,18 +21,28 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
     private readonly IFoundryAgentClient _agentClient;
     private readonly HttpClient _toolsHttp;
     private readonly string _toolsBaseUrl;
+    private readonly HttpClient _searchHttp;
+    private readonly string _searchEndpoint;
+    private readonly string _searchIndexName;
     private readonly ILogger<FoundrySpecGeneratorAgent> _logger;
 
     public FoundrySpecGeneratorAgent(
         IFoundryAgentClient agentClient,
         string toolsBaseUrl,
         string toolsApiKey,
+        string searchEndpoint,
+        string searchApiKey,
+        string searchIndexName,
         ILogger<FoundrySpecGeneratorAgent> logger)
     {
         _agentClient = agentClient;
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _toolsHttp = new HttpClient();
         _toolsHttp.DefaultRequestHeaders.Add("X-Api-Key", toolsApiKey);
+        _searchEndpoint = searchEndpoint.TrimEnd('/');
+        _searchIndexName = searchIndexName;
+        _searchHttp = new HttpClient();
+        _searchHttp.DefaultRequestHeaders.Add("api-key", searchApiKey);
         _logger = logger;
     }
 
@@ -42,12 +53,12 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         // a. Fetch work item from Tools API
         var workItemJson = await FetchWorkItemAsync(workItemId, ct);
 
-        // b. Extract title and fetch relevant repo context
+        // b. Extract title and query Azure AI Search for relevant code snippets
         var title = ExtractTitle(workItemJson);
-        var repoContextJson = await FetchRepoContextAsync(title, ct);
+        var repoContext = await QueryAzureSearchAsync(title, ct);
 
         // c. Build combined payload for the Foundry agent
-        var payload = BuildPayload(workItemJson, repoContextJson);
+        var payload = BuildPayload(workItemJson, repoContext);
 
         // d+e. Call the agent and parse the response, retrying on JSON errors
         string lastRaw = string.Empty;
@@ -88,15 +99,52 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         return body;
     }
 
-    private async Task<string> FetchRepoContextAsync(string query, CancellationToken ct)
+    private async Task<List<RepoContextItem>> QueryAzureSearchAsync(string query, CancellationToken ct)
     {
-        var bodyJson = JsonSerializer.Serialize(new { query });
+        var url = $"{_searchEndpoint}/indexes/{_searchIndexName}/docs/search?api-version={SearchApiVersion}";
+        var bodyJson = JsonSerializer.Serialize(new { search = query, select = "filePath,content", top = 5 });
         using var content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
-        var resp = await _toolsHttp.PostAsync($"{_toolsBaseUrl}/repo-context", content, ct);
+
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _searchHttp.PostAsync(url, content, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Azure AI Search request failed — continuing without repo context");
+            return [];
+        }
+
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            _logger.LogWarning("Tools API POST /repo-context → {Status}: {Body}", (int)resp.StatusCode, body);
-        return body;
+        {
+            _logger.LogWarning("Azure AI Search POST /docs/search → {Status}: {Body} — continuing without repo context",
+                (int)resp.StatusCode, body);
+            return [];
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("value", out var values))
+                return [];
+
+            var results = new List<RepoContextItem>();
+            foreach (var item in values.EnumerateArray())
+            {
+                var filePath = item.TryGetProperty("filePath", out var fp) ? fp.GetString() ?? string.Empty : string.Empty;
+                var itemContent = item.TryGetProperty("content", out var c) ? c.GetString() ?? string.Empty : string.Empty;
+                if (!string.IsNullOrWhiteSpace(filePath))
+                    results.Add(new RepoContextItem(filePath, itemContent));
+            }
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse Azure AI Search response — continuing without repo context");
+            return [];
+        }
     }
 
     private static string ExtractTitle(string workItemJson)
@@ -112,28 +160,18 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         return string.Empty;
     }
 
-    private static string BuildPayload(string workItemJson, string repoContextJson)
+    private static string BuildPayload(string workItemJson, IReadOnlyList<RepoContextItem> repoContext)
     {
-        JsonElement workItem;
-        using (var doc = JsonDocument.Parse(workItemJson))
-            workItem = doc.RootElement.Clone();
+        using var doc = JsonDocument.Parse(workItemJson);
+        var workItem = doc.RootElement.Clone();
 
-        JsonElement? repoContext = null;
-        if (!string.IsNullOrWhiteSpace(repoContextJson))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(repoContextJson);
-                repoContext = doc.RootElement.Clone();
-            }
-            catch { }
-        }
+        var mapped = repoContext.Select(r => new { file = r.File, content = r.Content }).ToArray();
 
         return JsonSerializer.Serialize(new
         {
             workItem,
             projectConfig = new { stack = ".NET 8, Clean Architecture" },
-            repoContext
+            repoContext = mapped.Length > 0 ? (object?)mapped : null
         });
     }
 
@@ -155,6 +193,8 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         var end = raw.LastIndexOf('}');
         return start >= 0 && end > start ? raw[start..(end + 1)] : raw;
     }
+
+    private sealed record RepoContextItem(string File, string Content);
 
     // Matches the schema the Foundry Agent is configured to return (see README for portal setup).
     private sealed class FoundrySpec

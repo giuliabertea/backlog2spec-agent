@@ -15,25 +15,24 @@ Two modes of operation — pick the one that fits your setup:
 | Mode | What runs | When to use |
 |---|---|---|
 | **Direct** (default) | CLI → two-step LLM pipeline (enrichment + spec) | Simplest, no extra infrastructure |
-| **Agent** | CLI → Tools API → Foundry Agent (Responses API) | Iterate on the system prompt in the portal; agent receives enriched context |
+| **Agent** | CLI → Tools API + Azure AI Search → Azure OpenAI Assistant (Assistants API) | Iterate on the system prompt in the portal; agent receives grounded context from your indexed codebase |
 
-In Agent mode the CLI calls the Tools API to fetch the work item and repo context, builds a single JSON payload, and sends it to the Foundry agent in one request. No threads, no polling, no tool callbacks.
+In Agent mode the CLI calls the Tools API to fetch the work item, queries Azure AI Search for relevant code snippets, builds a single JSON payload, and sends it to the Azure OpenAI Assistant via the classic Assistants API (threads + runs + polling).
 
 ```
 Direct mode:
   ADO work item → Enrichment LLM → Spec LLM → Terminal / .md / JSON
 
 Agent mode:
-  Tools API (/workitem, /repo-context)
-       │
-       ▼  combined JSON payload
-  Foundry Agent (Responses API)
-       │
-       ▼
-  Terminal / .md / JSON
+  Tools API (/workitem/{id})       Azure AI Search
+           │                              │
+           └──────────┬───────────────────┘
+                      ▼  combined JSON payload
+         Azure OpenAI Assistant (Assistants API)
+                      │
+                      ▼
+         Terminal / .md / JSON
 ```
-
-RAG (Phase 3) enriches the `/repo-context` endpoint with a pre-built Azure AI Search index of your codebase.
 
 ---
 
@@ -127,13 +126,14 @@ Use the ARM template above (recommended) **or** create the resources manually:
 
 ---
 
-### Step 2 — Create the Foundry agent (Agent mode only)
+### Step 2 — Create the Azure OpenAI Assistant (Agent mode only)
 
 > Skip this step if you are using **Direct mode** (the default). You can always add Agent mode later.
 
-1. Go to [ai.azure.com](https://ai.azure.com) → your project → **Agents** → **New agent**.
-2. Name it (e.g. `backlog2spec-agent`) and note the **Agent ID** shown in the portal — you will set it as `AzureAI:AgentId` in Step 6.
-3. Paste this system prompt:
+1. Go to [oai.azure.com](https://oai.azure.com) (Azure OpenAI Studio) → **Assistants** → **Create**.
+2. Name it (e.g. `backlog2spec-agent`) and note the **Assistant ID** shown in the portal — you will set it as `AzureAI:AgentId` in Step 6.
+3. Select the `gpt-4o` deployment.
+4. Paste this system prompt:
 
 ```
 You are a senior software engineer generating production-ready structured specs
@@ -159,9 +159,9 @@ Rules:
 - Be complete: cover all edge cases implied by the ticket
 ```
 
-4. Select the `gpt-4o` deployment. Save the agent.
+5. Save the assistant. No tool definitions are needed in the portal.
 
-> No tool definitions are needed in the portal. The CLI fetches work item and repo context data itself and passes everything as a single JSON payload to the agent.
+> The CLI fetches the work item via the Tools API and retrieves relevant code snippets directly from Azure AI Search, then passes everything as a single JSON payload to the assistant. The assistant never calls tools itself.
 
 ---
 
@@ -267,17 +267,21 @@ dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
 
 ```bash
 dotnet user-secrets set "AzureAI:UseAgent"          "true"
-dotnet user-secrets set "AzureAI:ProjectEndpoint"   "https://<hub-resource>.services.ai.azure.com/api/projects/<project-name>"
-dotnet user-secrets set "AzureAI:TenantId"          "your-tenant-id"
-dotnet user-secrets set "AzureAI:AgentId"           "your-agent-id"
+dotnet user-secrets set "AzureAI:ProjectEndpoint"   "https://<resource>.openai.azure.com/openai"
+dotnet user-secrets set "AzureAI:AgentId"           "your-assistant-id"
 dotnet user-secrets set "AzureAI:ToolsBaseUrl"      "https://your-tools-api.azurewebsites.net"
 dotnet user-secrets set "AzureAI:ToolsApiKey"       "your-shared-secret"
+
+dotnet user-secrets set "AzureSearch:Endpoint"      "https://<name>.search.windows.net"
+dotnet user-secrets set "AzureSearch:ApiKey"        "your-search-admin-key"
+dotnet user-secrets set "AzureSearch:IndexName"     "codebase-chunks"
 ```
 
-> `AzureAI:ProjectEndpoint` must use the `services.ai.azure.com/api/projects/...` format — this is the new Azure AI Foundry endpoint. Hub-based (`*.openai.azure.com`) endpoints hit the classic Assistants backend and will not work.
-> `AzureAI:AgentId` is the ID shown in the Foundry portal under the agent's details. It is used as the `model` field when calling the Foundry Responses API.
-> Auth uses your `az login` session (`AzureCliCredential`). Run `az login --tenant your-tenant-id` before using the tool in Agent mode.
-> `AzureAI:ToolsBaseUrl` and `AzureAI:ToolsApiKey` are required in Agent mode — the CLI calls the Tools API to fetch the work item and repo context before invoking the agent.
+> `AzureAI:ProjectEndpoint` must be the Azure OpenAI resource base URL in the format `https://<resource>.openai.azure.com/openai`. The CLI appends `/threads`, `/messages`, `/runs`, etc. when calling the classic Assistants API.
+> `AzureAI:ApiKey` (already set in Direct mode) is reused as the `api-key` header for Assistants API calls — no separate key needed.
+> `AzureAI:AgentId` is the Assistant ID shown in Azure OpenAI Studio under the assistant's details.
+> `AzureSearch:IndexName` defaults to `codebase-chunks` if not set — you only need to set it if you used a custom index name when running `index-repo.ps1`.
+> `AzureAI:ToolsBaseUrl` and `AzureAI:ToolsApiKey` are required in Agent mode — the CLI calls the Tools API to fetch the work item before invoking the assistant.
 
 > **Migrating from a previous version?** The secret keys were renamed: `AzureOpenAI:*` → `AzureAI:*`. Re-run the commands above with the new names.
 
@@ -526,21 +530,24 @@ Use it to encode team-specific constraints the AI should always respect — thin
 
 ## Agent mode — how it works
 
-In Agent mode the CLI does the data fetching itself and sends a single, self-contained JSON payload to the Foundry agent via the Responses API. No tool callbacks, no threads, no polling.
+In Agent mode the CLI fetches the work item from the Tools API, retrieves relevant code snippets from Azure AI Search, builds a single self-contained JSON payload, and sends it to the Azure OpenAI Assistant via the classic Assistants API (threads → messages → runs → polling → read messages → delete thread).
 
-**What the CLI sends to the agent:**
+**What the CLI sends to the assistant:**
 
 ```json
 {
   "workItem":     { "id": 12345, "title": "...", "description": "...", "acceptanceCriteria": "..." },
   "projectConfig": { "stack": ".NET 8, Clean Architecture" },
-  "repoContext":  { ... }
+  "repoContext":  [
+    { "file": "src/Services/AuthService.cs", "content": "..." },
+    { "file": "src/Controllers/LoginController.cs", "content": "..." }
+  ]
 }
 ```
 
-The `workItem` field comes from `GET {ToolsBaseUrl}/workitem/{id}`. The `repoContext` field comes from `POST {ToolsBaseUrl}/repo-context` using the work item title as the search query. Both calls use `X-Api-Key` authentication against the Tools API.
+The `workItem` field comes from `GET {ToolsBaseUrl}/workitem/{id}` (Tools API, `X-Api-Key` auth). The `repoContext` array comes from a direct Azure AI Search query using the work item title, returning up to 5 matching code chunks (`filePath` + `content` fields). If the search call fails for any reason the pipeline continues with `repoContext: null`.
 
-**System prompt (set in the Foundry portal — see Step 2):**
+**System prompt (set in Azure OpenAI Studio — see Step 2):**
 
 ```
 You are a senior software engineer generating production-ready structured specs
@@ -605,11 +612,15 @@ Use `--local` instead of `--global` if you installed locally. Re-run `scripts/in
 | `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
 | `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 6 |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` | Run `dotnet new tool-manifest` in your project root |
-| `Unexpected error: AzureAI:AgentId secret is missing` | `UseAgent` is true but `AgentId` not set | Copy the agent ID from the Foundry portal and run `dotnet user-secrets set "AzureAI:AgentId" "your-id"` |
-| `Unexpected error: AzureAI:ProjectEndpoint secret is missing` | `UseAgent` is true but `ProjectEndpoint` not set | Set `AzureAI:ProjectEndpoint` to your `services.ai.azure.com/api/projects/...` URL |
-| `Foundry Responses API POST /responses → 401` | Wrong token scope or tenant | Run `az login --tenant your-tenant-id`; verify `AzureAI:TenantId` is correct |
-| `Foundry Responses API POST /responses → 404` | Wrong agent ID or endpoint format | Copy the agent ID from the Foundry portal; ensure `ProjectEndpoint` uses the `services.ai.azure.com/api/projects/...` format |
+| `Unexpected error: AzureAI:AgentId secret is missing` | `UseAgent` is true but `AgentId` not set | Copy the assistant ID from Azure OpenAI Studio and run `dotnet user-secrets set "AzureAI:AgentId" "your-id"` |
+| `Unexpected error: AzureAI:ProjectEndpoint secret is missing` | `UseAgent` is true but `ProjectEndpoint` not set | Set `AzureAI:ProjectEndpoint` to `https://<resource>.openai.azure.com/openai` |
+| `Unexpected error: AzureSearch:Endpoint secret is missing` | `UseAgent` is true but search endpoint not set | Run `dotnet user-secrets set "AzureSearch:Endpoint" "https://<name>.search.windows.net"` |
+| `POST /threads → 401` | Wrong API key for the Azure OpenAI resource | Verify `AzureAI:ApiKey` matches the key under your Azure OpenAI resource → Keys and Endpoint |
+| `POST /threads → 404` | Wrong endpoint format | Ensure `AzureAI:ProjectEndpoint` ends with `/openai` and points to your Azure OpenAI resource (not a Foundry project URL) |
+| `Run <id> ended with status 'failed'` | Assistant run failed (e.g. model error) | Check the assistant configuration in Azure OpenAI Studio; verify the deployment name is `gpt-4o` |
 | `Tools API GET /workitem/... → 401` | Wrong `ToolsApiKey` | Re-set `AzureAI:ToolsApiKey` to match the `Security__ApiKey` env var on the Tools API |
+| `Azure AI Search POST /docs/search → 401` | Wrong search API key | Use the **admin key** from Azure AI Search → Settings → Keys; set as `AzureSearch:ApiKey` |
+| `Azure AI Search POST /docs/search → 404` | Wrong index name or search URL | Check `AzureSearch:IndexName` matches the index created by `index-repo.ps1`; verify `AzureSearch:Endpoint` |
 | `index-repo.ps1` fails with 401 | Wrong search key | Use the **admin key** from Azure AI Search → Settings → Keys |
 | `index-repo.ps1` fails with 404 on index creation | Search service not found | Check `-SearchUrl` matches your service name exactly |
 | GPT-4o deployment fails with `ModelNotFound` | Model not available in the selected region | Redeploy to `eastus`, `swedencentral`, or `australiaeast` |

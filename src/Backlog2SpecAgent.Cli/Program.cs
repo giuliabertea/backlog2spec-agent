@@ -52,21 +52,26 @@ var host = Host.CreateDefaultBuilder(args)
             {
                 var projectEndpoint = config["AzureAI:ProjectEndpoint"]
                     ?? throw new InvalidOperationException("AzureAI:ProjectEndpoint secret is missing when AzureAI:UseAgent is true.");
-                var tenantId = config["AzureAI:TenantId"]
-                    ?? throw new InvalidOperationException("AzureAI:TenantId secret is missing when AzureAI:UseAgent is true.");
                 var agentId = config["AzureAI:AgentId"]
                     ?? throw new InvalidOperationException("AzureAI:AgentId secret is missing when AzureAI:UseAgent is true.");
                 var toolsBaseUrl = config["AzureAI:ToolsBaseUrl"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsBaseUrl secret is missing when AzureAI:UseAgent is true.");
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");
+                var searchEndpoint = config["AzureSearch:Endpoint"]
+                    ?? throw new InvalidOperationException("AzureSearch:Endpoint secret is missing when AzureAI:UseAgent is true.");
+                var searchApiKey = config["AzureSearch:ApiKey"]
+                    ?? throw new InvalidOperationException("AzureSearch:ApiKey secret is missing when AzureAI:UseAgent is true.");
+                var searchIndexName = config["AzureSearch:IndexName"] ?? "codebase-chunks";
+
                 services.AddSingleton<IFoundryAgentClient>(sp =>
-                    new FoundryAgentClient(projectEndpoint, tenantId, agentId,
+                    new FoundryAgentClient(projectEndpoint, apiKey, agentId,
                         sp.GetRequiredService<ILogger<FoundryAgentClient>>()));
                 services.AddSingleton<ISpecGeneratorAgent>(sp =>
                     new FoundrySpecGeneratorAgent(
                         sp.GetRequiredService<IFoundryAgentClient>(),
                         toolsBaseUrl, toolsApiKey,
+                        searchEndpoint, searchApiKey, searchIndexName,
                         sp.GetRequiredService<ILogger<FoundrySpecGeneratorAgent>>()));
             }
             else
