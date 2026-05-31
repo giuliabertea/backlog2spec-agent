@@ -54,17 +54,20 @@ var host = Host.CreateDefaultBuilder(args)
                     ?? throw new InvalidOperationException("AzureAI:ProjectEndpoint secret is missing when AzureAI:UseAgent is true.");
                 var tenantId = config["AzureAI:TenantId"]
                     ?? throw new InvalidOperationException("AzureAI:TenantId secret is missing when AzureAI:UseAgent is true.");
-                var agentName = config["AzureAI:AgentName"]
-                    ?? throw new InvalidOperationException("AzureAI:AgentName secret is missing when AzureAI:UseAgent is true.");
-                var agentId = config["AzureAI:AgentId"]; // optional — bypasses GetAgentsAsync when set
+                var agentId = config["AzureAI:AgentId"]
+                    ?? throw new InvalidOperationException("AzureAI:AgentId secret is missing when AzureAI:UseAgent is true.");
                 var toolsBaseUrl = config["AzureAI:ToolsBaseUrl"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsBaseUrl secret is missing when AzureAI:UseAgent is true.");
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");
                 services.AddSingleton<IFoundryAgentClient>(sp =>
-                    new FoundryAgentClient(projectEndpoint, tenantId, agentName, agentId, toolsBaseUrl, toolsApiKey,
+                    new FoundryAgentClient(projectEndpoint, tenantId, agentId,
                         sp.GetRequiredService<ILogger<FoundryAgentClient>>()));
-                services.AddSingleton<ISpecGeneratorAgent, FoundrySpecGeneratorAgent>();
+                services.AddSingleton<ISpecGeneratorAgent>(sp =>
+                    new FoundrySpecGeneratorAgent(
+                        sp.GetRequiredService<IFoundryAgentClient>(),
+                        toolsBaseUrl, toolsApiKey,
+                        sp.GetRequiredService<ILogger<FoundrySpecGeneratorAgent>>()));
             }
             else
             {

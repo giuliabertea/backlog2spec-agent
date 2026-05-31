@@ -78,7 +78,9 @@
       "WebSearch",
       "WebFetch(domain:deepwiki.com)",
       "PowerShell(Add-Type -Path \"C:\\\\Users\\\\gbert\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\lib\\\\net8.0\\\\Azure.AI.Agents.Persistent.dll\"; [Azure.AI.Agents.Persistent.PersistentAgentsAudience] | Get-Member -Static | Where-Object { $_.MemberType -eq 'Property' } | Select-Object Name, Definition)",
-      "PowerShell($xmlFile = \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\azure.ai.agents.persistent.1.1.0.nupkg\"; if \\(Test-Path $xmlFile\\) { \"exists\" } else { Get-ChildItem \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\\" })"
+      "PowerShell($xmlFile = \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\azure.ai.agents.persistent.1.1.0.nupkg\"; if \\(Test-Path $xmlFile\\) { \"exists\" } else { Get-ChildItem \"$env:USERPROFILE\\\\.nuget\\\\packages\\\\azure.ai.agents.persistent\\\\1.1.0\\\\\" })",
+      "Bash(cd /d \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\")",
+      "Bash(Get-ChildItem -Recurse -File)"
     ]
   }
 }

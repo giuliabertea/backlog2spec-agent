@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Backlog2SpecAgent.Cli.Infrastructure.AI;
@@ -16,17 +17,21 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         PropertyNameCaseInsensitive = true
     };
 
-    private static readonly JsonSerializerOptions PayloadOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     private readonly IFoundryAgentClient _agentClient;
+    private readonly HttpClient _toolsHttp;
+    private readonly string _toolsBaseUrl;
     private readonly ILogger<FoundrySpecGeneratorAgent> _logger;
 
-    public FoundrySpecGeneratorAgent(IFoundryAgentClient agentClient, ILogger<FoundrySpecGeneratorAgent> logger)
+    public FoundrySpecGeneratorAgent(
+        IFoundryAgentClient agentClient,
+        string toolsBaseUrl,
+        string toolsApiKey,
+        ILogger<FoundrySpecGeneratorAgent> logger)
     {
         _agentClient = agentClient;
+        _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
+        _toolsHttp = new HttpClient();
+        _toolsHttp.DefaultRequestHeaders.Add("X-Api-Key", toolsApiKey);
         _logger = logger;
     }
 
@@ -34,8 +39,17 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
     {
         _logger.LogInformation("Starting Foundry Agent spec generation for work item {WorkItemId}", workItemId);
 
-        var payload = JsonSerializer.Serialize(new { workItemId }, PayloadOptions);
+        // a. Fetch work item from Tools API
+        var workItemJson = await FetchWorkItemAsync(workItemId, ct);
 
+        // b. Extract title and fetch relevant repo context
+        var title = ExtractTitle(workItemJson);
+        var repoContextJson = await FetchRepoContextAsync(title, ct);
+
+        // c. Build combined payload for the Foundry agent
+        var payload = BuildPayload(workItemJson, repoContextJson);
+
+        // d+e. Call the agent and parse the response, retrying on JSON errors
         string lastRaw = string.Empty;
         JsonException? lastException = null;
 
@@ -62,6 +76,65 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         }
 
         throw new LlmFormatException(lastRaw, lastException);
+    }
+
+    private async Task<string> FetchWorkItemAsync(int workItemId, CancellationToken ct)
+    {
+        var resp = await _toolsHttp.GetAsync($"{_toolsBaseUrl}/workitem/{workItemId}", ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                $"Tools API GET /workitem/{workItemId} → {(int)resp.StatusCode}: {body}");
+        return body;
+    }
+
+    private async Task<string> FetchRepoContextAsync(string query, CancellationToken ct)
+    {
+        var bodyJson = JsonSerializer.Serialize(new { query });
+        using var content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+        var resp = await _toolsHttp.PostAsync($"{_toolsBaseUrl}/repo-context", content, ct);
+        var body = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode)
+            _logger.LogWarning("Tools API POST /repo-context → {Status}: {Body}", (int)resp.StatusCode, body);
+        return body;
+    }
+
+    private static string ExtractTitle(string workItemJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(workItemJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("title", out var t) || root.TryGetProperty("Title", out t))
+                return t.GetString() ?? string.Empty;
+        }
+        catch { }
+        return string.Empty;
+    }
+
+    private static string BuildPayload(string workItemJson, string repoContextJson)
+    {
+        JsonElement workItem;
+        using (var doc = JsonDocument.Parse(workItemJson))
+            workItem = doc.RootElement.Clone();
+
+        JsonElement? repoContext = null;
+        if (!string.IsNullOrWhiteSpace(repoContextJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(repoContextJson);
+                repoContext = doc.RootElement.Clone();
+            }
+            catch { }
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            workItem,
+            projectConfig = new { stack = ".NET 8, Clean Architecture" },
+            repoContext
+        });
     }
 
     private static GeneratedSpec MapToGeneratedSpec(FoundrySpec foundrySpec) =>

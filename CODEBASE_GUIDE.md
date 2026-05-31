@@ -99,12 +99,24 @@ dotnet backlog-2-spec spec 12345
 There are two separate configuration sources:
 
 **1. User secrets (credentials — never committed to repo):**
+
+Direct mode:
 ```
 AzureAI:Endpoint        → LLM service URL
 AzureAI:ApiKey          → LLM API key
 AzureAI:DeploymentName  → e.g. "gpt-4o"
 AzureAI:EndpointType    → "AzureOpenAI" or "AzureFoundry"
 Ado:Pat                 → Azure DevOps Personal Access Token
+```
+
+Agent mode (add these):
+```
+AzureAI:UseAgent        → "true"
+AzureAI:ProjectEndpoint → Foundry project URL (services.ai.azure.com/api/projects/...)
+AzureAI:TenantId        → Azure tenant ID
+AzureAI:AgentId         → Agent ID from the Foundry portal
+AzureAI:ToolsBaseUrl    → HTTP endpoint of the Tools API
+AzureAI:ToolsApiKey     → Shared secret for the Tools API
 ```
 Set via: `dotnet user-secrets set "AzureAI:Endpoint" "https://..."`
 
@@ -160,8 +172,14 @@ Error handling is also centralized here: custom exceptions (`ConfigException`, `
 This is where the two-step AI enrichment happens. Both agents follow the same pattern:
 load prompt template → fill variables → call LLM → parse JSON → retry up to 2 times on failure.
 
+**`FoundrySpecGeneratorAgent.cs`** — Agent-mode spec generation
+- Used when `AzureAI:UseAgent = true` (replaces the two-step `EnrichmentAgent` + `SpecGeneratorAgent` pipeline)
+- Calls the Tools API `GET /workitem/{id}` and `POST /repo-context` directly using `toolsBaseUrl` and `toolsApiKey`
+- Builds a single JSON payload `{ workItem, projectConfig, repoContext }` and sends it to `FoundryAgentClient.RunAsync()`
+- Parses the JSON response into `GeneratedSpec`, retrying up to 2 times on JSON errors
+
 **`CodebaseContextAgent.cs`** — Codebase file fetcher
-- Only runs when `repoName` is set in config
+- Only runs when `repoName` is set in config (Direct mode only — not used in Agent mode)
 - Lists all files in the ADO repo, scores them by keyword match, fetches the top candidates, re-scores by content, returns the top 8 files (≤ 2000 chars each)
 - If this fails for any reason, it logs a warning and returns an empty list — the pipeline continues without context
 
@@ -170,7 +188,7 @@ load prompt template → fill variables → call LLM → parse JSON → retry up
 - Receives a JSON `EnrichedTicket` with: `missingAcceptanceCriteria`, `edgeCases`, `constraints`, `affectedComponents`, `ambiguities`
 - Temperature = 0.1 (near-deterministic)
 
-**`SpecGeneratorAgent.cs`** — Spec synthesis via LLM
+**`SpecGeneratorAgent.cs`** — Spec synthesis via LLM (Direct mode)
 - Takes the `EnrichedTicket` + codebase context
 - Sends to LLM with the spec prompt
 - Receives a JSON `GeneratedSpec` with: `goal`, `behaviour`, `edgeCases`, `outOfScope`, `filesToChange`
@@ -314,6 +332,23 @@ User: dotnet backlog-2-spec spec 12345
         └── RenderRaw() → (if --raw)
 ```
 
+### Agent Mode — Single Work Item (`AzureAI:UseAgent = true`)
+
+```
+SpecCommand.ExecuteAsync()
+├── ConfigLoader.LoadAsync()
+│
+└── FoundrySpecGeneratorAgent.GenerateAsync(workItemId)
+      ├── GET {ToolsBaseUrl}/workitem/{id}  (X-Api-Key header) → workItemJson
+      ├── POST {ToolsBaseUrl}/repo-context  (X-Api-Key header, query = title) → repoContextJson
+      ├── Build payload: { workItem, projectConfig, repoContext }
+      ├── FoundryAgentClient.RunAsync(payload)
+      │     └── POST {ProjectEndpoint}/responses?api-version=... → response text
+      │         (Bearer token via AzureCliCredential)
+      └── Parse JSON → GeneratedSpec
+          (retry up to 2x on JSON parse failure)
+```
+
 ### Feature/Epic Export (hierarchy)
 
 ```
@@ -341,14 +376,15 @@ SpecCommand.ExecuteHierarchyAsync()
 
 Every external dependency is behind an interface with a real and a mock implementation:
 
-| Interface | Real | Mock |
-|---|---|---|
-| `IAdoClient` | `AdoClient` | `MockAdoClient` |
-| `IEnrichmentAgent` | `EnrichmentAgent` | `MockEnrichmentAgent` |
-| `ISpecGeneratorAgent` | `SpecGeneratorAgent` | `MockSpecGeneratorAgent` |
-| `ICodebaseContextAgent` | `CodebaseContextAgent` | `MockCodebaseContextAgent` |
-| `IKeywordExtractor` | `LlmKeywordExtractor` | `StopwordKeywordExtractor` (also a fallback) |
-| `IOutputRenderer` | `OutputRenderer` | — |
+| Interface | Real (Direct mode) | Real (Agent mode) | Mock |
+|---|---|---|---|
+| `IAdoClient` | `AdoClient` | `AdoClient` | `MockAdoClient` |
+| `ISpecGeneratorAgent` | `SpecGeneratorAgent` | `FoundrySpecGeneratorAgent` | `MockSpecGeneratorAgent` |
+| `IFoundryAgentClient` | — | `FoundryAgentClient` | `MockFoundryAgentClient` |
+| `IEnrichmentAgent` | `EnrichmentAgent` | — | `MockEnrichmentAgent` |
+| `ICodebaseContextAgent` | `CodebaseContextAgent` | — | `MockCodebaseContextAgent` |
+| `IKeywordExtractor` | `LlmKeywordExtractor` | — | `StopwordKeywordExtractor` (also a fallback) |
+| `IOutputRenderer` | `OutputRenderer` | `OutputRenderer` | — |
 
 DI registration is done in `Program.cs` — real or mock branch based on `--mock` flag.
 
@@ -383,7 +419,7 @@ All domain errors are typed exceptions rather than generic `Exception`. This all
 - **Connection:** `VssConnection` created in `AdoClient` constructor using `Ado:Organization` URL
 - **REST API (direct HTTP):** Used in `CodebaseContextAgent` for git file listing and content — standard `HttpClient` with `Authorization: Basic <base64(pat)>` header
 
-### Azure AI / LLM
+### Azure AI / LLM (Direct mode)
 
 - **SDK:** `Microsoft.SemanticKernel`
 - **Auth:** API key stored in user secrets as `AzureAI:ApiKey`
@@ -392,6 +428,15 @@ All domain errors are typed exceptions rather than generic `Exception`. This all
   - `AzureFoundry` → Azure AI Foundry model-as-a-service endpoint
 - **Model:** deployment name configured as `AzureAI:DeploymentName` (typically `gpt-4o`)
 - **Settings:** temperature = 0.1, no streaming — each agent call is a single `GetChatMessageContentsAsync()` call
+
+### Azure AI Foundry Responses API (Agent mode)
+
+- **No SDK** — direct `HttpClient` calls to the Responses REST API (`2025-05-15-preview`)
+- **Auth:** `AzureCliCredential` (requires `az login --tenant <tenantId>`) with scope `https://ai.azure.com/.default`
+- **Endpoint:** `POST {AzureAI:ProjectEndpoint}/responses?api-version=2025-05-15-preview`
+- **Request body:** `{ "model": "<agentId>", "input": "<payload>" }`
+- **Response parsing:** reads `output_text` (convenience field) or traverses `output[].content[].text`
+- **Tools API:** `FoundrySpecGeneratorAgent` calls `GET /workitem/{id}` and `POST /repo-context` on `AzureAI:ToolsBaseUrl` with `X-Api-Key` auth before invoking the Foundry agent
 
 ### Spectre.Console
 

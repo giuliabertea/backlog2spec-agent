@@ -10,28 +10,30 @@ The output renders in the terminal with syntax highlighting, can be saved as a m
 
 ## How it works
 
-```
-ADO work item
-      │
-      ▼
-  Enrichment          ← infers missing AC, edge cases, ambiguities (direct LLM call)
-      │
-      ▼
-  Spec generation     ← produces Goal / Behaviour / Edge Cases / Out of Scope / Files to Change
-      │               ← uses: project config + dev rules + codebase context (ADO repo or RAG)
-      ▼
-  Terminal / .md / JSON
-```
-
-Three modes of operation — pick the one that fits your setup:
+Two modes of operation — pick the one that fits your setup:
 
 | Mode | What runs | When to use |
 |---|---|---|
-| **Direct** (default) | CLI → Azure OpenAI LLM | Simplest, works immediately |
-| **Agent** (Phase 1) | CLI → Azure AI Foundry Agent | Iterate on the system prompt in the portal without code changes |
-| **Agent + Tools** (Phase 2) | Agent calls `/workitem` and `/repo-context` HTTP tools at runtime | Full agentic flow; agent fetches its own data |
+| **Direct** (default) | CLI → two-step LLM pipeline (enrichment + spec) | Simplest, no extra infrastructure |
+| **Agent** | CLI → Tools API → Foundry Agent (Responses API) | Iterate on the system prompt in the portal; agent receives enriched context |
 
-RAG (Phase 3) enriches the `repo-context` tool with a pre-built Azure AI Search index of your codebase, so the agent retrieves precise file snippets rather than guessing from ADO repo browsing.
+In Agent mode the CLI calls the Tools API to fetch the work item and repo context, builds a single JSON payload, and sends it to the Foundry agent in one request. No threads, no polling, no tool callbacks.
+
+```
+Direct mode:
+  ADO work item → Enrichment LLM → Spec LLM → Terminal / .md / JSON
+
+Agent mode:
+  Tools API (/workitem, /repo-context)
+       │
+       ▼  combined JSON payload
+  Foundry Agent (Responses API)
+       │
+       ▼
+  Terminal / .md / JSON
+```
+
+RAG (Phase 3) enriches the `/repo-context` endpoint with a pre-built Azure AI Search index of your codebase.
 
 ---
 
@@ -138,10 +140,9 @@ You are a senior software engineer generating production-ready structured specs
 from Azure DevOps work items.
 
 You receive a JSON object with:
-  workItem:      the enriched ticket data (id, title, missingAcceptanceCriteria, edgeCases, constraints, affectedComponents, ambiguities)
-  projectConfig: stack, conventions, architecture
-  devRules:      (optional) team-specific architectural rules
-  repoContext:   (optional) relevant source file snippets
+  workItem:      the ADO ticket data (id, title, description, acceptanceCriteria)
+  projectConfig: stack information
+  repoContext:   relevant source file snippets
 
 Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
 {
@@ -154,14 +155,13 @@ Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
 
 Rules:
 - Follow Clean Architecture principles
-- Respect devRules exactly — never suggest patterns listed as forbidden
 - Reference real file paths from repoContext when available
 - Be complete: cover all edge cases implied by the ticket
 ```
 
 4. Select the `gpt-4o` deployment. Save the agent.
 
-> The tool registers the `get_work_item` and `repo_context` tool definitions on the agent automatically at first use — you do not need to add them manually in the portal.
+> No tool definitions are needed in the portal. The CLI fetches work item and repo context data itself and passes everything as a single JSON payload to the agent.
 
 ---
 
@@ -269,20 +269,15 @@ dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
 dotnet user-secrets set "AzureAI:UseAgent"          "true"
 dotnet user-secrets set "AzureAI:ProjectEndpoint"   "https://<hub-resource>.services.ai.azure.com/api/projects/<project-name>"
 dotnet user-secrets set "AzureAI:TenantId"          "your-tenant-id"
-dotnet user-secrets set "AzureAI:AgentName"         "backlog2spec-agent"
 dotnet user-secrets set "AzureAI:AgentId"           "your-agent-id"
+dotnet user-secrets set "AzureAI:ToolsBaseUrl"      "https://your-tools-api.azurewebsites.net"
+dotnet user-secrets set "AzureAI:ToolsApiKey"       "your-shared-secret"
 ```
 
 > `AzureAI:ProjectEndpoint` must use the `services.ai.azure.com/api/projects/...` format — this is the new Azure AI Foundry endpoint. Hub-based (`*.openai.azure.com`) endpoints hit the classic Assistants backend and will not work.
-> `AzureAI:AgentId` is the ID shown in the Foundry portal under the agent's details. `AzureAI:AgentName` is used as a fallback ID if `AzureAI:AgentId` is not set.
+> `AzureAI:AgentId` is the ID shown in the Foundry portal under the agent's details. It is used as the `model` field when calling the Foundry Responses API.
 > Auth uses your `az login` session (`AzureCliCredential`). Run `az login --tenant your-tenant-id` before using the tool in Agent mode.
-
-#### Tools API (add these if deploying Phase 2)
-
-```bash
-dotnet user-secrets set "AzureAI:ToolsBaseUrl" "https://your-tools-api.azurewebsites.net"
-dotnet user-secrets set "AzureAI:ToolsApiKey"  "your-shared-secret"
-```
+> `AzureAI:ToolsBaseUrl` and `AzureAI:ToolsApiKey` are required in Agent mode — the CLI calls the Tools API to fetch the work item and repo context before invoking the agent.
 
 > **Migrating from a previous version?** The secret keys were renamed: `AzureOpenAI:*` → `AzureAI:*`. Re-run the commands above with the new names.
 
@@ -312,9 +307,9 @@ Typical run on a 50-file project takes under 30 seconds.
 
 ---
 
-### Step 8 — Deploy the Tools API (Phase 2 only)
+### Step 8 — Deploy the Tools API (Agent mode only)
 
-> Skip this step if you are using Direct mode or Agent mode without tools.
+> Skip this step if you are using Direct mode.
 
 The Tools API is a self-contained ASP.NET Core app that the agent calls at runtime. Build it with Docker:
 
@@ -339,7 +334,7 @@ cd src/Backlog2SpecAgent.Tools
 dotnet run
 ```
 
-The API must be reachable from Azure AI Foundry (i.e., publicly accessible or on the same VNet). Update the agent system prompt to instruct it to use tools (see the [Agent + Tools system prompt](#agent--tools-system-prompt) section).
+The API must be reachable from the machine running the CLI — it does not need to be publicly accessible. The CLI calls it directly before sending the combined payload to the Foundry agent.
 
 ---
 
@@ -529,20 +524,32 @@ Use it to encode team-specific constraints the AI should always respect — thin
 
 ---
 
-## Agent + Tools system prompt
+## Agent mode — how it works
 
-When deploying Phase 2 (the Tools API), update the agent system prompt in [ai.azure.com](https://ai.azure.com) to instruct the agent to call tools rather than read from a pre-built payload:
+In Agent mode the CLI does the data fetching itself and sends a single, self-contained JSON payload to the Foundry agent via the Responses API. No tool callbacks, no threads, no polling.
+
+**What the CLI sends to the agent:**
+
+```json
+{
+  "workItem":     { "id": 12345, "title": "...", "description": "...", "acceptanceCriteria": "..." },
+  "projectConfig": { "stack": ".NET 8, Clean Architecture" },
+  "repoContext":  { ... }
+}
+```
+
+The `workItem` field comes from `GET {ToolsBaseUrl}/workitem/{id}`. The `repoContext` field comes from `POST {ToolsBaseUrl}/repo-context` using the work item title as the search query. Both calls use `X-Api-Key` authentication against the Tools API.
+
+**System prompt (set in the Foundry portal — see Step 2):**
 
 ```
 You are a senior software engineer generating production-ready structured specs
 from Azure DevOps work items.
 
-You receive a JSON object with a single field: { "workItemId": <int> }.
-
-Steps:
-1. Call get_work_item with the workItemId to fetch the ticket details.
-2. Call repo_context with a relevant search query to fetch related source files.
-3. Using the ticket data and source context, generate a structured spec.
+You receive a JSON object with:
+  workItem:      the ADO ticket data
+  projectConfig: stack information
+  repoContext:   relevant source file snippets
 
 Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
 {
@@ -552,14 +559,7 @@ Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
   "outOfScope": ["string"],
   "filesToChange": [{ "file": "string", "change": "string" }]
 }
-
-Rules:
-- Follow Clean Architecture principles
-- Reference real file paths from the repo context when available
-- Be complete: cover all edge cases implied by the ticket
 ```
-
-> The tool definitions are registered on the agent automatically by the CLI on first use — you do not need to add them in the portal.
 
 ---
 
@@ -605,10 +605,11 @@ Use `--local` instead of `--global` if you installed locally. Re-run `scripts/in
 | `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
 | `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 6 |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` | Run `dotnet new tool-manifest` in your project root |
-| `Unexpected error: AzureAI:AgentName secret is missing` | `UseAgent` is true but `AgentName` not set | `dotnet user-secrets set "AzureAI:AgentName" "backlog2spec-agent"` |
+| `Unexpected error: AzureAI:AgentId secret is missing` | `UseAgent` is true but `AgentId` not set | Copy the agent ID from the Foundry portal and run `dotnet user-secrets set "AzureAI:AgentId" "your-id"` |
 | `Unexpected error: AzureAI:ProjectEndpoint secret is missing` | `UseAgent` is true but `ProjectEndpoint` not set | Set `AzureAI:ProjectEndpoint` to your `services.ai.azure.com/api/projects/...` URL |
-| `Foundry API POST /threads → 401` | Wrong token scope or tenant | Run `az login --tenant your-tenant-id`; verify `AzureAI:TenantId` is correct |
-| `Foundry API POST /threads/…/runs → 404` | Wrong agent ID | Copy the agent ID from the Foundry portal and set `AzureAI:AgentId` |
+| `Foundry Responses API POST /responses → 401` | Wrong token scope or tenant | Run `az login --tenant your-tenant-id`; verify `AzureAI:TenantId` is correct |
+| `Foundry Responses API POST /responses → 404` | Wrong agent ID or endpoint format | Copy the agent ID from the Foundry portal; ensure `ProjectEndpoint` uses the `services.ai.azure.com/api/projects/...` format |
+| `Tools API GET /workitem/... → 401` | Wrong `ToolsApiKey` | Re-set `AzureAI:ToolsApiKey` to match the `Security__ApiKey` env var on the Tools API |
 | `index-repo.ps1` fails with 401 | Wrong search key | Use the **admin key** from Azure AI Search → Settings → Keys |
 | `index-repo.ps1` fails with 404 on index creation | Search service not found | Check `-SearchUrl` matches your service name exactly |
 | GPT-4o deployment fails with `ModelNotFound` | Model not available in the selected region | Redeploy to `eastus`, `swedencentral`, or `australiaeast` |
