@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
@@ -12,6 +13,8 @@ namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
 public sealed class FoundryAgentClient : IFoundryAgentClient
 {
     private const string ApiVersion = "2024-05-01-preview";
+    private const int MaxRateLimitRetries = 3;
+    private const int RateLimitRetryFallbackSeconds = 60;
 
     private readonly string _baseUrl;
     private readonly string _apiKey;
@@ -44,12 +47,24 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         {
             await AddMessageAsync(threadId, userMessage, ct);
 
-            var runId = await CreateRunAsync(threadId, ct);
-            _logger.LogDebug("Created run {RunId} on thread {ThreadId}", runId, threadId);
+            for (var attempt = 1; ; attempt++)
+            {
+                var runId = await CreateRunAsync(threadId, ct);
+                _logger.LogDebug("Created run {RunId} on thread {ThreadId} (attempt {Attempt})", runId, threadId, attempt);
 
-            await PollUntilCompleteAsync(threadId, runId, ct);
-
-            return await GetAssistantMessageAsync(threadId, ct);
+                try
+                {
+                    await PollUntilCompleteAsync(threadId, runId, ct);
+                    return await GetAssistantMessageAsync(threadId, ct);
+                }
+                catch (RateLimitException ex) when (attempt <= MaxRateLimitRetries)
+                {
+                    _logger.LogWarning(
+                        "Run {RunId} hit rate limit (attempt {Attempt}/{Max}). Waiting {Seconds}s before retry.",
+                        runId, attempt, MaxRateLimitRetries, ex.RetryAfterSeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(ex.RetryAfterSeconds), ct);
+                }
+            }
         }
         finally
         {
@@ -123,6 +138,9 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
                     lastError.TryGetProperty("message", out var msg))
                     errorMsg = msg.GetString() ?? string.Empty;
 
+                if (IsRateLimitError(errorMsg))
+                    throw new RateLimitException(ExtractRetryAfterSeconds(errorMsg), errorMsg);
+
                 throw new InvalidOperationException($"Run {runId} ended with status '{status}': {errorMsg}");
             }
         }
@@ -170,9 +188,27 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
         }
     }
 
+    private static bool IsRateLimitError(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("token rate limit") || lower.Contains("rate limit");
+    }
+
+    private static int ExtractRetryAfterSeconds(string message)
+    {
+        var match = Regex.Match(message, @"\b(\d+)\s*seconds?\b", RegexOptions.IgnoreCase);
+        return match.Success ? int.Parse(match.Groups[1].Value) : RateLimitRetryFallbackSeconds;
+    }
+
     private HttpRequestMessage BuildRequest(HttpMethod method, string path) =>
         new(method, $"{_baseUrl}/{path}?api-version={ApiVersion}")
         {
             Headers = { { "api-key", _apiKey } }
         };
+
+    private sealed class RateLimitException(int retryAfterSeconds, string message)
+        : Exception(message)
+    {
+        public int RetryAfterSeconds { get; } = retryAfterSeconds;
+    }
 }

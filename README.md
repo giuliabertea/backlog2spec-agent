@@ -203,9 +203,11 @@ backlog-2-spec-agent --version
 
 ---
 
-### Step 5 — Add the config file to your project
+### Step 5 — Add the config file to your project (optional)
 
-Create `backlog-2-spec.json` in the root of **your project** (not the Backlog2SpecAgent repo). The tool searches upward from the current working directory to find it.
+`backlog-2-spec.json` is optional. If the file is not found, the tool falls back to built-in defaults and generates the spec without project-specific context. You will get better, more grounded output if you create it — but the tool works without it.
+
+To create it, place `backlog-2-spec.json` in the root of **your project** (not the Backlog2SpecAgent repo). The tool searches upward from the current working directory to find it.
 
 ```json
 {
@@ -231,7 +233,7 @@ Create `backlog-2-spec.json` in the root of **your project** (not the Backlog2Sp
 }
 ```
 
-Required fields: `ado.organization`, `ado.project`, `project.name`. The `repoName` and `branch` fields are optional — when set, the tool fetches relevant source files from your ADO repo and uses them as context. The `devRulesFile` field is optional — see the [Project rules file](#project-rules-file) section.
+The file itself is optional — the tool falls back to defaults if it is absent. When present, `ado.organization`, `ado.project`, and `project.name` are required; all other fields are optional. `repoName` and `branch` enable source-file context fetching from your ADO repo. `devRulesFile` injects team-specific rules into every prompt — see the [Project rules file](#project-rules-file) section.
 
 **Commit this file to your project repo.** It contains no secrets.
 
@@ -351,7 +353,7 @@ cd path/to/your-project
 backlog-2-spec-agent spec 1 --mock
 ```
 
-This runs the full pipeline with stub implementations. If it prints a spec, your config file is found and parsed correctly.
+This runs the full pipeline with stub implementations. If it prints a spec, the tool is installed correctly. If a `backlog-2-spec.json` is present it will also be found and parsed; the tool works without one.
 
 For a live test:
 
@@ -604,7 +606,7 @@ Use `--local` instead of `--global` if you installed locally. Re-run `scripts/in
 
 | Error | Cause | Fix |
 |---|---|---|
-| `Configuration error: 'backlog-2-spec.json' not found` | No config file in CWD or any parent | Create `backlog-2-spec.json` in your project root |
+| `Configuration error: 'backlog-2-spec.json' not found` | The file was expected but could not be located | The config file is optional — the tool falls back to defaults when absent. If you intended to use one, ensure it is in your project root or any parent directory |
 | `Missing required field: ado.organization` | Config file incomplete | Add the missing field |
 | `Configuration error: devRulesFile not found: '...'` | Path in `devRulesFile` does not exist | Check the path is relative to `backlog-2-spec.json` |
 | `Authentication error: Failed to connect to Azure DevOps` | Invalid PAT or org URL | Re-set `Ado:Pat` and verify `ado.organization` |

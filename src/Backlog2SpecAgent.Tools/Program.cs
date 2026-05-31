@@ -61,6 +61,93 @@ app.MapGet("/workitem/{id:int}", async (int id, IConfiguration config, IHttpClie
     });
 });
 
+// ── GET /workitem/{id}/hierarchy ────────────────────────────────────────────
+app.MapGet("/workitem/{id:int}/hierarchy", async (int id, IConfiguration config, IHttpClientFactory factory) =>
+{
+    var org = config["Ado:Organization"];
+    var project = config["Ado:Project"];
+    var pat = config["Ado:Pat"];
+
+    if (string.IsNullOrEmpty(org) || string.IsNullOrEmpty(project) || string.IsNullOrEmpty(pat))
+        return Results.Problem("ADO configuration incomplete. Set Ado:Organization, Ado:Project, and Ado:Pat.");
+
+    using var http = factory.CreateClient();
+    http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+        "Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes($":{pat}")));
+
+    // 1. Fetch parent with relations expanded
+    var parentUrl = $"{org.TrimEnd('/')}/{project}/_apis/wit/workitems/{id}?$expand=relations&api-version=7.1";
+    var parentResp = await http.GetAsync(parentUrl);
+
+    if (parentResp.StatusCode == System.Net.HttpStatusCode.NotFound)
+        return Results.NotFound(new { error = $"Work item {id} not found." });
+
+    if (!parentResp.IsSuccessStatusCode)
+        return Results.Problem($"ADO returned {(int)parentResp.StatusCode}: {parentResp.ReasonPhrase}");
+
+    var parentJson = await parentResp.Content.ReadAsStringAsync();
+    using var parentDoc = JsonDocument.Parse(parentJson);
+    var parentFields = parentDoc.RootElement.GetProperty("fields");
+
+    var parentDto = new
+    {
+        id,
+        title            = GetField(parentFields, "System.Title"),
+        workItemType     = GetField(parentFields, "System.WorkItemType"),
+        description      = StripHtml(GetField(parentFields, "System.Description")),
+        acceptanceCriteria = StripHtml(GetField(parentFields, "Microsoft.VSTS.Common.AcceptanceCriteria"))
+    };
+
+    // 2. Extract child IDs from Hierarchy-Forward relations
+    var childIds = new List<int>();
+    if (parentDoc.RootElement.TryGetProperty("relations", out var relations))
+    {
+        foreach (var rel in relations.EnumerateArray())
+        {
+            if (!rel.TryGetProperty("rel", out var relType) ||
+                relType.GetString() != "System.LinkTypes.Hierarchy-Forward") continue;
+            if (!rel.TryGetProperty("url", out var urlProp)) continue;
+            var relUrl = urlProp.GetString();
+            if (string.IsNullOrEmpty(relUrl)) continue;
+            var lastSegment = relUrl.Split('/').LastOrDefault();
+            if (int.TryParse(lastSegment, out var childId))
+                childIds.Add(childId);
+        }
+    }
+
+    // 3. Bulk-fetch children if any
+    var childrenDtos = new List<object>();
+    if (childIds.Count > 0)
+    {
+        var idsParam = string.Join(",", childIds);
+        var childrenUrl = $"{org.TrimEnd('/')}/{project}/_apis/wit/workitems?ids={idsParam}&$expand=all&api-version=7.1";
+        var childrenResp = await http.GetAsync(childrenUrl);
+
+        if (childrenResp.IsSuccessStatusCode)
+        {
+            using var childrenDoc = JsonDocument.Parse(await childrenResp.Content.ReadAsStringAsync());
+            if (childrenDoc.RootElement.TryGetProperty("value", out var childItems))
+            {
+                foreach (var child in childItems.EnumerateArray())
+                {
+                    var childId = child.TryGetProperty("id", out var cid) ? cid.GetInt32() : 0;
+                    var childFields = child.GetProperty("fields");
+                    childrenDtos.Add(new
+                    {
+                        id = childId,
+                        title            = GetField(childFields, "System.Title"),
+                        workItemType     = GetField(childFields, "System.WorkItemType"),
+                        description      = StripHtml(GetField(childFields, "System.Description")),
+                        acceptanceCriteria = StripHtml(GetField(childFields, "Microsoft.VSTS.Common.AcceptanceCriteria"))
+                    });
+                }
+            }
+        }
+    }
+
+    return Results.Ok(new { parent = parentDto, children = childrenDtos });
+});
+
 // ── POST /repo-context ──────────────────────────────────────────────────────
 app.MapPost("/repo-context", async (RepoContextRequest req, IConfiguration config, IHttpClientFactory factory) =>
 {

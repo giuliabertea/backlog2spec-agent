@@ -38,6 +38,7 @@ var host = Host.CreateDefaultBuilder(args)
         {
             services.AddSingleton<IAdoClient, MockAdoClient>();
             services.AddSingleton<ISpecGeneratorAgent, MockSpecGeneratorAgent>();
+            services.AddSingleton<IHierarchyFetcher, MockHierarchyFetcher>();
         }
         else
         {
@@ -74,6 +75,8 @@ var host = Host.CreateDefaultBuilder(args)
                         toolsBaseUrl, toolsApiKey,
                         searchEndpoint, searchApiKey, searchIndexName,
                         sp.GetRequiredService<ILogger<FoundrySpecGeneratorAgent>>()));
+                services.AddSingleton<IHierarchyFetcher>(
+                    _ => new ToolsApiHierarchyFetcher(toolsBaseUrl, toolsApiKey));
             }
             else
             {
@@ -89,6 +92,8 @@ var host = Host.CreateDefaultBuilder(args)
                 services.AddSingleton<ICodebaseContextAgent>(sp =>
                     new CodebaseContextAgent(pat, sp.GetRequiredService<IKeywordExtractor>(), sp.GetRequiredService<ILogger<CodebaseContextAgent>>()));
                 services.AddSingleton<ISpecGeneratorAgent, SpecGeneratorAgent>();
+                services.AddSingleton<IHierarchyFetcher>(sp =>
+                    new AdoHierarchyFetcher(sp.GetRequiredService<IAdoClient>()));
             }
         }
 

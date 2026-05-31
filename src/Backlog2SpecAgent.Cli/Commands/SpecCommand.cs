@@ -11,19 +11,19 @@ namespace Backlog2SpecAgent.Cli.Commands;
 
 public sealed class SpecCommand : Command
 {
-    private readonly IAdoClient _adoClient;
+    private readonly IHierarchyFetcher _hierarchyFetcher;
     private readonly ISpecGeneratorAgent _specGeneratorAgent;
     private readonly IOutputRenderer _renderer;
     private readonly ILogger<SpecCommand> _logger;
 
     public SpecCommand(
-        IAdoClient adoClient,
+        IHierarchyFetcher hierarchyFetcher,
         ISpecGeneratorAgent specGeneratorAgent,
         IOutputRenderer renderer,
         ILogger<SpecCommand> logger)
         : base("spec", "Generate a structured spec from an Azure DevOps work item")
     {
-        _adoClient = adoClient;
+        _hierarchyFetcher = hierarchyFetcher;
         _specGeneratorAgent = specGeneratorAgent;
         _renderer = renderer;
         _logger = logger;
@@ -130,7 +130,7 @@ public sealed class SpecCommand : Command
         {
             if (!raw) _renderer.RenderProgress($"Fetching {expectedType} #{id} with children...");
             _logger.LogInformation("Fetching hierarchy for work item {WorkItemId}", id);
-            var hierarchy = await _adoClient.GetWorkItemHierarchyAsync(id, ct);
+            var hierarchy = await _hierarchyFetcher.GetHierarchyAsync(id, ct);
 
             if (!string.Equals(hierarchy.Parent.WorkItemType, expectedType, StringComparison.OrdinalIgnoreCase))
             {
