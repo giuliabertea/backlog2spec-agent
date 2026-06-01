@@ -2,7 +2,7 @@
 
 A CLI tool that turns an Azure DevOps work item into a structured, ready-to-use spec — in seconds.
 
-Given a work item ID, it fetches the ticket from ADO, enriches it with AI (filling in missing acceptance criteria, edge cases, and ambiguities), optionally retrieves relevant source files from your indexed codebase for grounding, then generates a structured spec tailored to your project's stack and conventions.
+Given a work item ID (PBI, tus, bug, feature, epic), it fetches the ticket from ADO, enriches it with AI (filling context, edge cases, ambiguities), optionally retrieves relevant source files from your indexed codebase for grounding, then generates a structured spec tailored to your project's stack and conventions.
 
 ---
 
