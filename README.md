@@ -1,429 +1,40 @@
 # Backlog2SpecAgent
 
-A CLI tool that turns an Azure DevOps work item into a ready-to-use, structured spec — in seconds.
+A CLI tool that turns an Azure DevOps work item into a structured, ready-to-use spec — in seconds.
 
-Given a work item ID, it fetches the ticket from ADO, enriches it with AI (filling in missing acceptance criteria, edge cases, and ambiguities), optionally pulls relevant source files from your repository for grounding, then generates a structured spec tailored to your project's stack and conventions.
-
-The output renders in the terminal with syntax highlighting, can be saved as a markdown file, or piped as JSON for automation.
+Given a work item ID, it fetches the ticket from ADO, enriches it with AI (filling in missing acceptance criteria, edge cases, and ambiguities), optionally retrieves relevant source files from your indexed codebase for grounding, then generates a structured spec tailored to your project's stack and conventions.
 
 ---
 
-## How it works
-
-Two modes of operation — pick the one that fits your setup:
-
-| Mode | What runs | When to use |
-|---|---|---|
-| **Direct** (default) | CLI → two-step LLM pipeline (enrichment + spec) | Simplest, no extra infrastructure |
-| **Agent** | CLI → Tools API + Azure AI Search → Azure OpenAI Assistant (Assistants API) | Iterate on the system prompt in the portal; agent receives grounded context from your indexed codebase |
-
-In Agent mode the CLI calls the Tools API to fetch the work item, queries Azure AI Search for relevant code snippets, builds a single JSON payload, and sends it to the Azure OpenAI Assistant via the classic Assistants API (threads + runs + polling).
-
-```
-Direct mode:
-  ADO work item → Enrichment LLM → Spec LLM → Terminal / .md / JSON
-
-Agent mode:
-  Tools API (/workitem/{id})       Azure AI Search
-           │                              │
-           └──────────┬───────────────────┘
-                      ▼  combined JSON payload
-         Azure OpenAI Assistant (Assistants API)
-                      │
-                      ▼
-         Terminal / .md / JSON
-```
-
----
-
-## Quick start — deploy Azure resources
-
-The ARM template in `infra/azuredeploy.json` provisions everything in one command:
-
-- Azure AI Services account with GPT-4o deployment
-- Azure AI Foundry hub + project (for agent mode)
-- Azure AI Search service (for RAG)
-
-### Option A — Azure CLI
+## Commands
 
 ```bash
-# 1. Create a resource group (skip if you have one)
-az group create --name b2s-rg --location eastus
-
-# 2. Deploy all resources (~5 minutes)
-az deployment group create \
-  --resource-group b2s-rg \
-  --template-file infra/azuredeploy.json \
-  --parameters prefix=b2s location=eastus
-
-# 3. Read the outputs — you will need these values in Step 6 (secrets)
-az deployment group show \
-  --resource-group b2s-rg \
-  --name azuredeploy \
-  --query properties.outputs
-```
-
-### Option B — PowerShell
-
-```powershell
-# 1. Create a resource group (skip if you have one)
-New-AzResourceGroup -Name b2s-rg -Location eastus
-
-# 2. Deploy all resources
-New-AzResourceGroupDeployment `
-  -ResourceGroupName b2s-rg `
-  -TemplateFile infra/azuredeploy.json `
-  -prefix b2s `
-  -location eastus
-
-# 3. Read the outputs
-(Get-AzResourceGroupDeployment -ResourceGroupName b2s-rg -Name azuredeploy).Outputs
-```
-
-### Option C — Azure Portal
-
-1. Go to [portal.azure.com](https://portal.azure.com) → **Deploy a custom template** → **Build your own template in the editor**.
-2. Paste the contents of `infra/azuredeploy.json` and save.
-3. Fill in `prefix` and `location`, then deploy.
-
-> **GPT-4o regions:** The model is available in `eastus`, `eastus2`, `swedencentral`, `australiaeast`, `westus`, `westus3`. Use the same region for all resources to avoid cross-region egress.
-
-> **Search SKU:** `free` is enough for small repos (≤ 50 MB, 1 per subscription). Use `basic` for a real codebase.
-
-The outputs contain the exact values you will paste into `dotnet user-secrets` in Step 6.
-
----
-
-## Step-by-step setup
-
-Follow these steps in order. Steps 1–3 are one-time Azure setup. Steps 4–6 are one-time per machine. Steps 7–9 are one-time per project.
-
-### Step 1 — Provision Azure resources
-
-Use the ARM template above (recommended) **or** create the resources manually:
-
-<details>
-<summary>Manual Azure setup (click to expand)</summary>
-
-#### 1a — Azure AI Foundry
-
-1. Go to [ai.azure.com](https://ai.azure.com) and sign in.
-2. Click **New project** → give it a name → let it create a hub and resource group.
-3. Inside the project go to **Model catalog** → search `gpt-4o` → **Deploy**.
-4. Deployment name: `gpt-4o`. Confirm.
-5. Go to **Project → Settings → Keys and Endpoints** and note the **Endpoint URL** and **API Key**.
-
-> Classic Azure OpenAI resource also works: use `https://your-resource.openai.azure.com` as the endpoint and omit `AzureAI:EndpointType` (or set it to `AzureOpenAI`).
-
-#### 1b — Azure AI Search (for RAG — Phase 3)
-
-1. In the [Azure portal](https://portal.azure.com) search for **Azure AI Search** → **Create**.
-2. Choose **Basic** tier (or **Free** for small repos).
-3. Same region as your AI Foundry project.
-4. Once deployed, go to **Settings → Keys** and note the **Admin key** and the service URL (`https://<name>.search.windows.net`).
-
-</details>
-
----
-
-### Step 2 — Create the Azure OpenAI Assistant (Agent mode only)
-
-> Skip this step if you are using **Direct mode** (the default). You can always add Agent mode later.
-
-1. Go to [oai.azure.com](https://oai.azure.com) (Azure OpenAI Studio) → **Assistants** → **Create**.
-2. Name it (e.g. `backlog2spec-agent`) and note the **Assistant ID** shown in the portal — you will set it as `AzureAI:AgentId` in Step 6.
-3. Select the `gpt-4o` deployment.
-4. Paste this system prompt:
-
-```
-You are a senior software engineer generating production-ready structured specs
-from Azure DevOps work items.
-
-You receive a JSON object with:
-  workItem:      the ADO ticket data (id, title, description, acceptanceCriteria)
-  projectConfig: stack information
-  repoContext:   relevant source file snippets
-
-Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
-{
-  "goal": "string",
-  "behaviour": ["string"],
-  "edgeCases": ["string"],
-  "outOfScope": ["string"],
-  "filesToChange": [{ "file": "string", "change": "string" }]
-}
-
-Rules:
-- Follow Clean Architecture principles
-- Reference real file paths from repoContext when available
-- Be complete: cover all edge cases implied by the ticket
-```
-
-5. Save the assistant. No tool definitions are needed in the portal.
-
-> The CLI fetches the work item via the Tools API and retrieves relevant code snippets directly from Azure AI Search, then passes everything as a single JSON payload to the assistant. The assistant never calls tools itself.
-
----
-
-### Step 3 — Create an Azure DevOps PAT
-
-Each developer needs their own Personal Access Token.
-
-1. Go to `https://dev.azure.com/{your-org}/_usersSettings/tokens` → **New Token**.
-2. Configure:
-
-   | Setting | Value |
-   |---|---|
-   | Name | `Backlog2SpecAgent` |
-   | Expiration | 1 year (set a calendar reminder to renew) |
-   | Work Items | **Read** |
-   | Code | **Read** — only required if you set `repoName` in the config file |
-
-3. Copy the token — you will not see it again.
-
----
-
-### Step 4 — Clone this repo and install the CLI tool
-
-```bash
-git clone https://github.com/giuliabertea/Backlog2SpecAgent
-cd Backlog2SpecAgent
-
-dotnet pack src/Backlog2SpecAgent.Cli -o ./nupkg
-dotnet tool install --global --add-source ./nupkg Backlog2SpecAgent.Cli
-```
-
-Verify:
-
-```bash
-backlog-2-spec-agent --version
-```
-
-> **Local install (per-project):** If you prefer `--local` instead of `--global`, first run `dotnet new tool-manifest` inside **your** project directory, then come back here and run the install with `--local`.
-
----
-
-### Step 5 — Add the config file to your project (optional)
-
-`backlog-2-spec.json` is optional. If the file is not found, the tool falls back to built-in defaults and generates the spec without project-specific context. You will get better, more grounded output if you create it — but the tool works without it.
-
-To create it, place `backlog-2-spec.json` in the root of **your project** (not the Backlog2SpecAgent repo). The tool searches upward from the current working directory to find it.
-
-```json
-{
-  "project": {
-    "name": "MyService",
-    "language": "C#",
-    "framework": ".NET 8 / ASP.NET Core",
-    "testFramework": "xUnit",
-    "architecture": "Clean Architecture"
-  },
-  "conventions": {
-    "naming": "PascalCase classes, camelCase fields",
-    "folderStructure": "Feature-based",
-    "diPattern": "Constructor injection"
-  },
-  "ado": {
-    "organization": "https://dev.azure.com/your-org",
-    "project": "YourProject",
-    "repoName": "YourRepo",
-    "branch": "main"
-  },
-  "devRulesFile": "dev-rules.md"
-}
-```
-
-The file itself is optional — the tool falls back to defaults if it is absent. When present, `ado.organization`, `ado.project`, and `project.name` are required; all other fields are optional. `repoName` and `branch` enable source-file context fetching from your ADO repo. `devRulesFile` injects team-specific rules into every prompt — see the [Project rules file](#project-rules-file) section.
-
-**Commit this file to your project repo.** It contains no secrets.
-
-```bash
-git add backlog-2-spec.json
-git commit -m "add backlog-2-spec config"
-```
-
----
-
-### Step 6 — Set secrets
-
-Credentials are stored via `dotnet user-secrets` — never in files. Each developer runs this on their own machine. Run from inside the **Backlog2SpecAgent repo**:
-
-```bash
-cd path/to/Backlog2SpecAgent/src/Backlog2SpecAgent.Cli
-```
-
-#### Direct mode (default)
-
-```bash
-dotnet user-secrets set "AzureAI:Endpoint"       "https://<name>.cognitiveservices.azure.com/"
-dotnet user-secrets set "AzureAI:ApiKey"         "your-api-key"
-dotnet user-secrets set "AzureAI:DeploymentName" "gpt-4o"
-dotnet user-secrets set "AzureAI:EndpointType"   "AzureFoundry"
-
-dotnet user-secrets set "Ado:Pat"                "your-ado-pat"
-```
-
-> If you used the ARM template, copy the `aiServicesEndpoint`, `aiServicesKey`, and `gptDeploymentName` values from the deployment outputs directly.
-
-#### Agent mode (add these on top of Direct mode secrets)
-
-```bash
-dotnet user-secrets set "AzureAI:UseAgent"          "true"
-dotnet user-secrets set "AzureAI:ProjectEndpoint"   "https://<resource>.openai.azure.com/openai"
-dotnet user-secrets set "AzureAI:AgentId"           "your-assistant-id"
-dotnet user-secrets set "AzureAI:ToolsBaseUrl"      "https://your-tools-api.azurewebsites.net"
-dotnet user-secrets set "AzureAI:ToolsApiKey"       "your-shared-secret"
-
-dotnet user-secrets set "AzureSearch:Endpoint"      "https://<name>.search.windows.net"
-dotnet user-secrets set "AzureSearch:ApiKey"        "your-search-admin-key"
-dotnet user-secrets set "AzureSearch:IndexName"     "codebase-chunks"
-```
-
-> `AzureAI:ProjectEndpoint` must be the Azure OpenAI resource base URL in the format `https://<resource>.openai.azure.com/openai`. The CLI appends `/threads`, `/messages`, `/runs`, etc. when calling the classic Assistants API.
-> `AzureAI:ApiKey` (already set in Direct mode) is reused as the `api-key` header for Assistants API calls — no separate key needed.
-> `AzureAI:AgentId` is the Assistant ID shown in Azure OpenAI Studio under the assistant's details.
-> `AzureSearch:IndexName` defaults to `codebase-chunks` if not set — you only need to set it if you used a custom index name when running `index-repo.ps1`.
-> `AzureAI:ToolsBaseUrl` and `AzureAI:ToolsApiKey` are required in Agent mode — the CLI calls the Tools API to fetch the work item before invoking the assistant.
-
-> **Migrating from a previous version?** The secret keys were renamed: `AzureOpenAI:*` → `AzureAI:*`. Re-run the commands above with the new names.
-
----
-
-### Step 7 — Index your codebase for RAG (Phase 3)
-
-This step builds the Azure AI Search index that lets the agent retrieve grounded code snippets instead of guessing. Run it once after setup, and again whenever your codebase changes significantly.
-
-```powershell
-# From the Backlog2SpecAgent repo root
-.\scripts\index-repo.ps1 `
-    -SearchUrl  "https://<your-search>.search.windows.net" `
-    -SearchKey  "<admin-key>" `
-    -RepoPath   "C:\path\to\your-project"
-```
-
-> If you used the ARM template, copy `-SearchUrl` from the `searchEndpoint` output and `-SearchKey` from `searchAdminKey`.
-
-The script:
-- Recursively scans `.cs` and `.md` files; skips `bin/`, `obj/`, and `*.generated.cs`
-- Splits files into 300–500 line chunks at class/method and heading boundaries
-- Upserts chunks to an index named `codebase-chunks` by default (created automatically on first run; override with `-IndexName`)
-- Is safe to re-run — existing documents are updated, not duplicated
-
-Typical run on a 50-file project takes under 30 seconds.
-
----
-
-### Step 8 — Deploy the Tools API (Agent mode only)
-
-> Skip this step if you are using Direct mode.
-
-The Tools API is a self-contained ASP.NET Core app that the agent calls at runtime. Build it with Docker:
-
-```bash
-# From the repo root
-docker build -f src/Backlog2SpecAgent.Tools/Dockerfile . -t b2s-tools
-
-docker run -d -p 8080:8080 \
-  -e Ado__Organization="https://dev.azure.com/your-org" \
-  -e Ado__Project="YourProject" \
-  -e Ado__RepoName="YourRepo" \
-  -e Ado__Branch="main" \
-  -e Ado__Pat="your-ado-pat" \
-  -e Security__ApiKey="your-shared-secret" \
-  b2s-tools
-```
-
-Or run locally without Docker:
-
-```bash
-cd src/Backlog2SpecAgent.Tools
-dotnet run
-```
-
-The API must be reachable from the machine running the CLI — it does not need to be publicly accessible. The CLI calls it directly before sending the combined payload to the Foundry agent.
-
----
-
-### Step 9 — Verify
-
-Run a mock smoke test from inside **your project directory** (no Azure calls, no secrets required):
-
-```bash
-cd path/to/your-project
-backlog-2-spec-agent spec 1 --mock
-```
-
-This runs the full pipeline with stub implementations. If it prints a spec, the tool is installed correctly. If a `backlog-2-spec.json` is present it will also be found and parsed; the tool works without one.
-
-For a live test:
-
-```bash
+# Generate a spec for a work item
 backlog-2-spec-agent spec 12345
-```
 
----
-
-## Usage
-
-### Basic
-
-```bash
-backlog-2-spec-agent spec 12345
-```
-
-### With verbose enrichment detail
-
-```bash
+# Show AI-identified gaps before the spec
 backlog-2-spec-agent spec 12345 --verbose
-```
 
-Shows the AI-identified missing acceptance criteria, edge cases, and ambiguities before the spec.
-
-### Save to markdown
-
-```bash
+# Save to markdown
 backlog-2-spec-agent spec 12345 --output ./specs/feature-12345.md
-```
 
-### JSON output (pipe-friendly)
-
-```bash
+# JSON output (pipe-friendly)
 backlog-2-spec-agent spec 12345 --raw
 backlog-2-spec-agent spec 12345 --raw | jq .goal
-```
 
-### Dry run without external calls
+# Export all children of a Feature or Epic
+backlog-2-spec-agent spec 12345 --feature
+backlog-2-spec-agent spec 12345 --epic
 
-```bash
+# Dry run — no external calls, no secrets required
 backlog-2-spec-agent spec 12345 --mock
 ```
 
-### Export all specs for a Feature or Epic
-
-```bash
-backlog-2-spec-agent spec 12345 --feature
-backlog-2-spec-agent spec 12345 --epic
-```
-
-Fetches the parent work item and all its children, generates a spec for each, and writes them to `spec/<id>-<slug>/`. A `_summary.md` index file is also created.
-
-`--feature` and `--epic` are mutually exclusive. If the work item type does not match, the tool reports an error.
+`--feature` and `--epic` generate a spec per child work item and write them to `spec/<id>-<slug>/`, with a `_summary.md` index. They are mutually exclusive.
 
 ---
 
 ## Spec output format
-
-Each generated spec contains five sections:
-
-| Section | Description |
-|---|---|
-| **Goal** | 1–3 sentences. The first states the capability being built; the others add outcome or non-obvious constraints. |
-| **Behaviour** | Plain-English bullets describing what the implementation must do. Written from the developer's perspective. |
-| **Edge Cases** | Boundary conditions and failure scenarios the developer should handle. |
-| **Out of Scope** | Things explicitly excluded from this work item. |
-| **Files to Change** | File paths with a one-line description of what changes in each. Resolved from actual source files when codebase context is available. |
-
-Example output:
 
 ```
 ── Goal ─────────────────────────────────────────
@@ -452,111 +63,66 @@ SSO, session timeout, password reset
 
 ---
 
-## Using specs with AI coding assistants
+## 1 — Azure environment setup
 
-The spec output format is designed to be pasted directly into GitHub Copilot Chat, Cursor, or any similar AI coding assistant.
+The ARM template in `infra/azuredeploy.json` provisions everything you need:
 
-### Single PBI
+- Azure AI Services account with a GPT-4o deployment
+- Azure AI Foundry hub and project
+- Azure AI Search service (for RAG)
 
-Save the spec with `--output`, then attach it in Copilot Chat and use:
+### Deploy with Azure CLI
 
-```
-Implement the spec in the attached file.
-Follow the "Files to Change" section exactly — only touch the listed files.
-Do not implement anything listed under "Out of Scope".
-```
+```bash
+az group create --name b2s-rg --location eastus
 
-### Full feature (multiple PBIs)
+az deployment group create \
+  --resource-group b2s-rg \
+  --template-file infra/azuredeploy.json \
+  --parameters prefix=b2s location=eastus
 
-When you export a feature with `--feature` or `--epic`, a folder of spec files is created under `spec/<id>-<slug>/`. Use this prompt, replacing `<folder>`:
-
-```
-Implement the following feature step by step.
-
-The feature spec is in `spec/<folder>/00-feature.md`.
-Each PBI spec is a numbered file in the same folder.
-
-Rules:
-1. Read the feature spec first to understand the overall goal and scope.
-2. Implement each PBI in file order (01, 02, …), one at a time.
-3. For each PBI, follow the "Files to Change" section exactly — only touch the listed files.
-4. Respect the "Out of Scope" section: do not implement anything listed there.
-5. After each PBI, stop and summarise what you changed before moving to the next.
-6. Do not refactor or improve code outside of what the spec asks for.
-
-Start with the feature spec, confirm your understanding of the goal, then begin PBI 01.
+# Read the outputs — you will need these values when setting secrets
+az deployment group show \
+  --resource-group b2s-rg \
+  --name azuredeploy \
+  --query properties.outputs
 ```
 
-> **Tip:** In Copilot Workspace you can attach all spec files directly — replace file path references with *"use the attached spec files"* and omit the folder reference.
+### Deploy with PowerShell
 
----
+```powershell
+New-AzResourceGroup -Name b2s-rg -Location eastus
 
-## Project rules file
+New-AzResourceGroupDeployment `
+  -ResourceGroupName b2s-rg `
+  -TemplateFile infra/azuredeploy.json `
+  -prefix b2s `
+  -location eastus
 
-The `devRulesFile` field in `backlog-2-spec.json` points to a markdown file that gets injected verbatim into both the enrichment and spec generation prompts.
-
-Use it to encode team-specific constraints the AI should always respect — things not expressible through the structured config fields.
-
-### Good candidates
-
-- Architectural constraints: *"never put business logic in controllers"*
-- Patterns that must be followed: *"always use the Result<T> pattern, never throw exceptions from services"*
-- Things to avoid: *"do not use AutoMapper — map manually"*
-- Layer ownership: *"the domain layer must not depend on infrastructure"*
-- Naming conventions too nuanced for a one-liner
-
-### Setup
-
-1. Create the file in your project root:
-
-   ```markdown
-   # dev-rules.md
-
-   - Never put business logic in controllers.
-   - All service methods return Result<T>. Never throw exceptions from the service layer.
-   - Do not use AutoMapper. All mapping is done in dedicated mapper classes.
-   - The domain layer must not reference any infrastructure or application layer types.
-   - Repository interfaces live in the domain layer; implementations in the infrastructure layer.
-   - Commands and queries follow MediatR: VerbNounCommand / VerbNounCommandHandler.
-   ```
-
-2. Reference it in `backlog-2-spec.json`:
-
-   ```json
-   { "devRulesFile": "dev-rules.md" }
-   ```
-
-3. Commit both files.
-
----
-
-## Agent mode — how it works
-
-In Agent mode the CLI fetches the work item from the Tools API, retrieves relevant code snippets from Azure AI Search, builds a single self-contained JSON payload, and sends it to the Azure OpenAI Assistant via the classic Assistants API (threads → messages → runs → polling → read messages → delete thread).
-
-**What the CLI sends to the assistant:**
-
-```json
-{
-  "workItem":     { "id": 12345, "title": "...", "description": "...", "acceptanceCriteria": "..." },
-  "projectConfig": { "stack": ".NET 8, Clean Architecture" },
-  "repoContext":  [
-    { "file": "src/Services/AuthService.cs", "content": "..." },
-    { "file": "src/Controllers/LoginController.cs", "content": "..." }
-  ]
-}
+(Get-AzResourceGroupDeployment -ResourceGroupName b2s-rg -Name azuredeploy).Outputs
 ```
 
-The `workItem` field comes from `GET {ToolsBaseUrl}/workitem/{id}` (Tools API, `X-Api-Key` auth). The `repoContext` array comes from a direct Azure AI Search query using the work item title, returning up to 5 matching code chunks (`filePath` + `content` fields). If the search call fails for any reason the pipeline continues with `repoContext: null`.
+### Deploy from the Azure Portal
 
-**System prompt (set in Azure OpenAI Studio — see Step 2):**
+Go to **portal.azure.com → Deploy a custom template → Build your own template in the editor**, paste `infra/azuredeploy.json`, fill in `prefix` and `location`, then deploy.
+
+> **GPT-4o regions:** `eastus`, `eastus2`, `swedencentral`, `australiaeast`, `westus`, `westus3`. Use the same region for all resources.
+
+> **Search SKU:** `free` works for small repos (≤ 50 MB, 1 per subscription). Use `basic` for a real codebase.
+
+### Create the Azure OpenAI Assistant
+
+1. Go to [oai.azure.com](https://oai.azure.com) → **Assistants → Create**.
+2. Name it (e.g. `backlog2spec-agent`) and note the **Assistant ID** — you will need it as `AzureAI:AssistantId`.
+3. Select the `gpt-4o` deployment.
+4. Paste this system prompt:
 
 ```
 You are a senior software engineer generating production-ready structured specs
 from Azure DevOps work items.
 
 You receive a JSON object with:
-  workItem:      the ADO ticket data
+  workItem:      the ADO ticket data (id, title, description, acceptanceCriteria)
   projectConfig: stack information
   repoContext:   relevant source file snippets
 
@@ -568,28 +134,130 @@ Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
   "outOfScope": ["string"],
   "filesToChange": [{ "file": "string", "change": "string" }]
 }
+
+Rules:
+- Follow Clean Architecture principles
+- Reference real file paths from repoContext when available
+- Be complete: cover all edge cases implied by the ticket
 ```
+
+5. Save. No tool definitions are needed in the portal.
+
+### Create an Azure DevOps PAT
+
+Each developer needs their own Personal Access Token.
+
+1. Go to `https://dev.azure.com/{your-org}/_usersSettings/tokens` → **New Token**.
+2. Set **Work Items: Read** (add **Code: Read** if you want source-file context from your ADO repo).
+3. Copy the token — you will not see it again.
 
 ---
 
-## Mock mode
+## 2 — CLI installation
 
 ```bash
-backlog-2-spec-agent spec 12345 --mock
+git clone https://github.com/giuliabertea/Backlog2SpecAgent
+cd Backlog2SpecAgent
+
+dotnet pack src/Backlog2SpecAgent.Cli -o ./nupkg
+dotnet tool install --global --add-source ./nupkg Backlog2SpecAgent.Cli
 ```
 
-Mock mode replaces every external dependency — ADO client, enrichment agent, spec generator — with fast stub implementations that return fixed data. No credentials are required and no network calls are made.
+Verify:
 
-Use it to:
-- Verify your `backlog-2-spec.json` config is found and parsed correctly
-- Test output formatting without waiting for AI responses
-- Try the full pipeline in CI or on a machine without secrets configured
+```bash
+backlog-2-spec-agent --version
+```
 
-Mock mode is detected at startup (before the DI container is built), so it works even if `AzureAI:*` secrets are not set.
+> Use `--local` instead of `--global` if you prefer a per-project install. Run `dotnet new tool-manifest` in your project directory first.
+
+### Set secrets
+
+Run from inside the `Backlog2SpecAgent/src/Backlog2SpecAgent.Cli` directory. These are per-machine and never stored in files.
+
+```bash
+dotnet user-secrets set "AzureAI:Endpoint"       "https://<name>.openai.azure.com"
+dotnet user-secrets set "AzureAI:ApiKey"          "your-api-key"
+dotnet user-secrets set "AzureAI:DeploymentName"  "gpt-4o"
+dotnet user-secrets set "AzureAI:AssistantId"     "asst_..."
+
+dotnet user-secrets set "Ado:Pat"                 "your-ado-pat"
+```
+
+> If you used the ARM template, copy `aiServicesEndpoint`, `aiServicesKey`, and `gptDeploymentName` directly from the deployment outputs.
+
+### Add the project config file (optional but recommended)
+
+Place `backlog-2-spec.json` in the root of **your project** (not the Backlog2SpecAgent repo). The tool searches upward from the current directory to find it. Without it, the tool falls back to built-in defaults.
+
+```json
+{
+  "project": {
+    "name": "MyService",
+    "language": "C#",
+    "framework": ".NET 8 / ASP.NET Core",
+    "testFramework": "xUnit",
+    "architecture": "Clean Architecture"
+  },
+  "conventions": {
+    "naming": "PascalCase classes, camelCase fields",
+    "folderStructure": "Feature-based",
+    "diPattern": "Constructor injection"
+  },
+  "ado": {
+    "organization": "https://dev.azure.com/your-org",
+    "project": "YourProject",
+    "repoName": "YourRepo",
+    "branch": "main"
+  },
+  "devRulesFile": "dev-rules.md"
+}
+```
+
+`ado.organization` and `ado.project` are required when the file is present. `repoName` and `branch` enable source-file context fetching from your ADO repo. `devRulesFile` injects team-specific rules into every prompt (see [Project rules file](#project-rules-file)).
+
+Commit this file — it contains no secrets.
 
 ---
 
-## Keeping the tool up to date
+## 3 — Running the tool
+
+### Smoke test (no secrets, no Azure calls)
+
+```bash
+cd path/to/your-project
+backlog-2-spec-agent spec 1 --mock
+```
+
+If it prints a spec, the tool is installed correctly.
+
+### Live run
+
+```bash
+cd path/to/your-project
+backlog-2-spec-agent spec 12345
+```
+
+### Index your codebase for RAG (run once, repeat after major changes)
+
+```powershell
+.\scripts\index-repo.ps1 `
+    -SearchUrl  "https://<your-search>.search.windows.net" `
+    -SearchKey  "<admin-key>" `
+    -RepoPath   "C:\path\to\your-project"
+```
+
+Add the Azure AI Search secrets:
+
+```bash
+dotnet user-secrets set "AzureSearch:Endpoint"   "https://<name>.search.windows.net"
+dotnet user-secrets set "AzureSearch:ApiKey"      "your-search-admin-key"
+dotnet user-secrets set "AzureSearch:IndexName"   "codebase-chunks"
+```
+
+The script scans `.cs` and `.md` files, splits them into 300–500 line chunks, and upserts them to the index. It is safe to re-run.
+
+### Update the tool
 
 ```bash
 cd path/to/Backlog2SpecAgent
@@ -598,31 +266,72 @@ dotnet pack src/Backlog2SpecAgent.Cli -o ./nupkg
 dotnet tool update --global --add-source ./nupkg Backlog2SpecAgent.Cli
 ```
 
-Use `--local` instead of `--global` if you installed locally. Re-run `scripts/index-repo.ps1` after a pull if the RAG index format has changed.
-
 ---
 
-## Troubleshooting
+## 4 — Other useful details
+
+### Using specs with AI coding assistants
+
+Save a spec with `--output`, attach it in Copilot Chat or Cursor, and use:
+
+```
+Implement the spec in the attached file.
+Follow the "Files to Change" section exactly — only touch the listed files.
+Do not implement anything listed under "Out of Scope".
+```
+
+For a full feature export (`--feature` or `--epic`):
+
+```
+Implement the following feature step by step.
+
+The feature spec is in `spec/<folder>/00-feature.md`.
+Each PBI spec is a numbered file in the same folder.
+
+Rules:
+1. Read the feature spec first to understand the overall goal and scope.
+2. Implement each PBI in file order (01, 02, …), one at a time.
+3. For each PBI, follow the "Files to Change" section exactly.
+4. Respect "Out of Scope" — do not implement anything listed there.
+5. After each PBI, summarise what you changed before moving to the next.
+6. Do not refactor code outside of what the spec asks for.
+
+Start with the feature spec, confirm your understanding, then begin PBI 01.
+```
+
+### Project rules file
+
+`devRulesFile` points to a markdown file that gets injected verbatim into every prompt. Use it for constraints that are too nuanced for the structured config fields.
+
+```markdown
+# dev-rules.md
+
+- Never put business logic in controllers.
+- All service methods return Result<T>. Never throw exceptions from the service layer.
+- Do not use AutoMapper. All mapping is done in dedicated mapper classes.
+- The domain layer must not reference any infrastructure or application layer types.
+- Repository interfaces live in the domain layer; implementations in the infrastructure layer.
+- Commands and queries follow MediatR: VerbNounCommand / VerbNounCommandHandler.
+```
+
+Reference it in `backlog-2-spec.json` with `"devRulesFile": "dev-rules.md"` and commit both files.
+
+### Troubleshooting
 
 | Error | Cause | Fix |
 |---|---|---|
-| `Configuration error: 'backlog-2-spec.json' not found` | The file was expected but could not be located | The config file is optional — the tool falls back to defaults when absent. If you intended to use one, ensure it is in your project root or any parent directory |
 | `Missing required field: ado.organization` | Config file incomplete | Add the missing field |
-| `Configuration error: devRulesFile not found: '...'` | Path in `devRulesFile` does not exist | Check the path is relative to `backlog-2-spec.json` |
+| `Configuration error: devRulesFile not found` | Path does not exist | Check the path is relative to `backlog-2-spec.json` |
 | `Authentication error: Failed to connect to Azure DevOps` | Invalid PAT or org URL | Re-set `Ado:Pat` and verify `ado.organization` |
-| `Authentication error: Authentication failed` | PAT expired or wrong scope | Generate a new PAT with Work Items: Read |
-| `AI response error: LLM returned invalid JSON` | Model returned malformed JSON after 3 retries | Check deployment name and quota; try again |
-| `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in Step 6 |
+| `Authentication error: PAT expired or wrong scope` | PAT expired | Generate a new PAT with Work Items: Read |
+| `AI response error: LLM returned invalid JSON` | Model returned malformed JSON | Check deployment name and quota; try again |
+| `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in the installation guide |
+| `Unexpected error: AzureAI:AssistantId secret is missing` | Assistant ID not set | Copy the ID from Azure OpenAI Studio and set the secret |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` | Run `dotnet new tool-manifest` in your project root |
-| `Unexpected error: AzureAI:AgentId secret is missing` | `UseAgent` is true but `AgentId` not set | Copy the assistant ID from Azure OpenAI Studio and run `dotnet user-secrets set "AzureAI:AgentId" "your-id"` |
-| `Unexpected error: AzureAI:ProjectEndpoint secret is missing` | `UseAgent` is true but `ProjectEndpoint` not set | Set `AzureAI:ProjectEndpoint` to `https://<resource>.openai.azure.com/openai` |
-| `Unexpected error: AzureSearch:Endpoint secret is missing` | `UseAgent` is true but search endpoint not set | Run `dotnet user-secrets set "AzureSearch:Endpoint" "https://<name>.search.windows.net"` |
-| `POST /threads → 401` | Wrong API key for the Azure OpenAI resource | Verify `AzureAI:ApiKey` matches the key under your Azure OpenAI resource → Keys and Endpoint |
-| `POST /threads → 404` | Wrong endpoint format | Ensure `AzureAI:ProjectEndpoint` ends with `/openai` and points to your Azure OpenAI resource (not a Foundry project URL) |
-| `Run <id> ended with status 'failed'` | Assistant run failed (e.g. model error) | Check the assistant configuration in Azure OpenAI Studio; verify the deployment name is `gpt-4o` |
-| `Tools API GET /workitem/... → 401` | Wrong `ToolsApiKey` | Re-set `AzureAI:ToolsApiKey` to match the `Security__ApiKey` env var on the Tools API |
-| `Azure AI Search POST /docs/search → 401` | Wrong search API key | Use the **admin key** from Azure AI Search → Settings → Keys; set as `AzureSearch:ApiKey` |
-| `Azure AI Search POST /docs/search → 404` | Wrong index name or search URL | Check `AzureSearch:IndexName` matches the index created by `index-repo.ps1`; verify `AzureSearch:Endpoint` |
-| `index-repo.ps1` fails with 401 | Wrong search key | Use the **admin key** from Azure AI Search → Settings → Keys |
-| `index-repo.ps1` fails with 404 on index creation | Search service not found | Check `-SearchUrl` matches your service name exactly |
-| GPT-4o deployment fails with `ModelNotFound` | Model not available in the selected region | Redeploy to `eastus`, `swedencentral`, or `australiaeast` |
+| `POST /threads → 401` | Wrong API key | Verify `AzureAI:ApiKey` matches the key under your Azure OpenAI resource |
+| `POST /threads → 404` | Wrong endpoint format | Ensure `AzureAI:Endpoint` points to your Azure OpenAI resource URL |
+| `Run <id> ended with status 'failed'` | Assistant run failed | Check the assistant config in Azure OpenAI Studio; verify deployment name is `gpt-4o` |
+| `Azure AI Search → 401` | Wrong search API key | Use the **admin key** from Azure AI Search → Settings → Keys |
+| `Azure AI Search → 404` | Wrong index name or URL | Check `AzureSearch:IndexName` matches the index created by `index-repo.ps1` |
+| `index-repo.ps1` fails with 401 | Wrong search key | Use the admin key from Azure AI Search → Settings → Keys |
+| `GPT-4o deployment fails with ModelNotFound` | Wrong region | Redeploy to `eastus`, `swedencentral`, or `australiaeast` |
