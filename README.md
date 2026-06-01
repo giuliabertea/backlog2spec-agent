@@ -9,25 +9,18 @@ Given a work item ID (PBI, tus, bug, feature, epic), it fetches the ticket from 
 ## Commands
 
 ```bash
-# Generate a spec for a work item
+# Generate a spec for a single work item (PBI, TUS, BUG)
 backlog-2-spec-agent spec 12345
 
-# Show AI-identified gaps before the spec
-backlog-2-spec-agent spec 12345 --verbose
+# Generate a spec for a single work item and save to markdown file
+backlog-2-spec-agent spec 12345 --output ./spec/feature-12345.md
 
-# Save to markdown
-backlog-2-spec-agent spec 12345 --output ./specs/feature-12345.md
-
-# JSON output (pipe-friendly)
+#  Generate a spec for a single work item in JSON format (pipe-friendly)
 backlog-2-spec-agent spec 12345 --raw
-backlog-2-spec-agent spec 12345 --raw | jq .goal
 
 # Export all children of a Feature or Epic
 backlog-2-spec-agent spec 12345 --feature
 backlog-2-spec-agent spec 12345 --epic
-
-# Dry run — no external calls, no secrets required
-backlog-2-spec-agent spec 12345 --mock
 ```
 
 `--feature` and `--epic` generate a spec per child work item and write them to `spec/<id>-<slug>/`, with a `_summary.md` index. They are mutually exclusive.
@@ -63,7 +56,7 @@ SSO, session timeout, password reset
 
 ---
 
-## 1 — Azure environment setup
+## Azure environment setup
 
 The ARM template in `infra/azuredeploy.json` provisions everything you need:
 
@@ -71,7 +64,7 @@ The ARM template in `infra/azuredeploy.json` provisions everything you need:
 - Azure AI Foundry hub and project
 - Azure AI Search service (for RAG)
 
-### Deploy with Azure CLI
+### 1. Deploy with Azure CLI
 
 ```bash
 az group create --name b2s-rg --location eastus
@@ -88,7 +81,7 @@ az deployment group show \
   --query properties.outputs
 ```
 
-### Deploy with PowerShell
+### 2. Deploy with PowerShell
 
 ```powershell
 New-AzResourceGroup -Name b2s-rg -Location eastus
@@ -102,7 +95,7 @@ New-AzResourceGroupDeployment `
 (Get-AzResourceGroupDeployment -ResourceGroupName b2s-rg -Name azuredeploy).Outputs
 ```
 
-### Deploy from the Azure Portal
+### 3. Deploy from the Azure Portal
 
 Go to **portal.azure.com → Deploy a custom template → Build your own template in the editor**, paste `infra/azuredeploy.json`, fill in `prefix` and `location`, then deploy.
 
@@ -143,6 +136,25 @@ Rules:
 
 5. Save. No tool definitions are needed in the portal.
 
+### Index your codebase for RAG (run once, repeat after major changes)
+
+```powershell
+.\scripts\index-repo.ps1 `
+    -SearchUrl  "https://<your-search>.search.windows.net" `
+    -SearchKey  "<admin-key>" `
+    -RepoPath   "C:\path\to\your-project"
+```
+
+Add the Azure AI Search secrets:
+
+```bash
+dotnet user-secrets set "AzureSearch:Endpoint"   "https://<name>.search.windows.net"
+dotnet user-secrets set "AzureSearch:ApiKey"      "your-search-admin-key"
+dotnet user-secrets set "AzureSearch:IndexName"   "codebase-chunks"
+```
+
+The script scans `.cs` and `.md` files, splits them into 300–500 line chunks, and upserts them to the index. It is safe to re-run.
+
 ### Create an Azure DevOps PAT
 
 Each developer needs their own Personal Access Token.
@@ -153,7 +165,7 @@ Each developer needs their own Personal Access Token.
 
 ---
 
-## 2 — CLI installation
+## CLI installation
 
 ```bash
 git clone https://github.com/giuliabertea/Backlog2SpecAgent
@@ -220,9 +232,9 @@ Commit this file — it contains no secrets.
 
 ---
 
-## 3 — Running the tool
+## Running the tool
 
-### Smoke test (no secrets, no Azure calls)
+### Smoke test
 
 ```bash
 cd path/to/your-project
@@ -237,26 +249,6 @@ If it prints a spec, the tool is installed correctly.
 cd path/to/your-project
 backlog-2-spec-agent spec 12345
 ```
-
-### Index your codebase for RAG (run once, repeat after major changes)
-
-```powershell
-.\scripts\index-repo.ps1 `
-    -SearchUrl  "https://<your-search>.search.windows.net" `
-    -SearchKey  "<admin-key>" `
-    -RepoPath   "C:\path\to\your-project"
-```
-
-Add the Azure AI Search secrets:
-
-```bash
-dotnet user-secrets set "AzureSearch:Endpoint"   "https://<name>.search.windows.net"
-dotnet user-secrets set "AzureSearch:ApiKey"      "your-search-admin-key"
-dotnet user-secrets set "AzureSearch:IndexName"   "codebase-chunks"
-```
-
-The script scans `.cs` and `.md` files, splits them into 300–500 line chunks, and upserts them to the index. It is safe to re-run.
-
 ### Update the tool
 
 ```bash
@@ -268,7 +260,7 @@ dotnet tool update --global --add-source ./nupkg Backlog2SpecAgent.Cli
 
 ---
 
-## 4 — Other useful details
+## Other useful details
 
 ### Using specs with AI coding assistants
 
