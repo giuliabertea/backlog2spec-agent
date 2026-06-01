@@ -41,17 +41,47 @@
       "metadata": {
         "description": "Azure AI Search pricing tier. 'free' allows 1 instance per subscription with 50 MB storage — sufficient for small repos. Use 'basic' or 'standard' for larger codebases or production use."
       }
+    },
+    "toolsApiKey": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Shared API key for the Tools API (Security:ApiKey). Must match AzureAI:ToolsApiKey in dotnet user-secrets. Can be set post-deployment if left empty."
+      }
+    },
+    "adoOrganization": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure DevOps organization URL used by the Tools API (e.g. https://dev.azure.com/your-org). Can be set post-deployment."
+      }
+    },
+    "adoProject": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure DevOps project name used by the Tools API. Can be set post-deployment."
+      }
+    },
+    "adoPat": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Azure DevOps Personal Access Token (Work Items: Read + Code: Read) for the Tools API. Can be set post-deployment."
+      }
     }
   },
 
   "variables": {
-    "aiServicesName": "[concat(parameters('prefix'), '-ai')]",
-    "searchName":     "[concat(parameters('prefix'), '-search')]",
-    "hubName":        "[concat(parameters('prefix'), '-hub')]",
-    "projectName":    "[concat(parameters('prefix'), '-project')]",
-    "storageName":    "[concat(toLower(replace(parameters('prefix'), '-', '')), 'st')]",
-    "keyVaultName":   "[concat(parameters('prefix'), '-kv')]",
-    "gptDeployment":  "gpt-4o"
+    "aiServicesName":    "[concat(parameters('prefix'), '-ai')]",
+    "searchName":        "[concat(parameters('prefix'), '-search')]",
+    "hubName":           "[concat(parameters('prefix'), '-hub')]",
+    "projectName":       "[concat(parameters('prefix'), '-project')]",
+    "storageName":       "[concat(toLower(replace(parameters('prefix'), '-', '')), 'st')]",
+    "keyVaultName":      "[concat(parameters('prefix'), '-kv')]",
+    "appServicePlanName":"[concat(parameters('prefix'), '-asp')]",
+    "toolsApiName":      "[concat(parameters('prefix'), '-tools')]",
+    "gptDeployment":     "gpt-4o"
   },
 
   "resources": [
@@ -102,7 +132,7 @@
     },
 
     {
-      "comments": "GPT-4o model deployment — used for both the direct LLM path and Foundry Agent mode.",
+      "comments": "GPT-4o model deployment — used for both the direct LLM path (AzureAI:DeploymentName) and agent mode (configured inside the Foundry agent).",
       "type": "Microsoft.CognitiveServices/accounts/deployments",
       "apiVersion": "2023-05-01",
       "name": "[concat(variables('aiServicesName'), '/', variables('gptDeployment'))]",
@@ -190,7 +220,7 @@
     },
 
     {
-      "comments": "Azure AI Search service — hosts the repo-context index used by Phase 3 RAG. Run scripts/index-repo.ps1 to populate it.",
+      "comments": "Azure AI Search — hosts the codebase index queried by AssistantSpecGeneratorAgent in agent mode (and by the RAG pipeline). Run scripts/index-repo.ps1 to populate the index.",
       "type": "Microsoft.Search/searchServices",
       "apiVersion": "2023-11-01",
       "name": "[variables('searchName')]",
@@ -202,6 +232,44 @@
         "hostingMode": "default",
         "publicNetworkAccess": "enabled"
       }
+    },
+
+    {
+      "comments": "App Service Plan — hosts the Tools API (Backlog2SpecAgent.Tools). B1 is the minimum tier that supports always-on; use Standard S1 or higher for production.",
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "B1", "tier": "Basic" },
+      "kind": "app",
+      "properties": { "reserved": false }
+    },
+
+    {
+      "comments": "Tools API Web App — exposes /workitem/{id}, /repo-context, and /spec endpoints called by AssistantSpecGeneratorAgent in agent mode. Deploy Backlog2SpecAgent.Tools to this app after provisioning. Set toolsApi.baseUrl in backlog-2-spec.json to the toolsApiUrl output value.",
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('toolsApiName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "netFrameworkVersion": "v8.0",
+          "minTlsVersion": "1.2",
+          "appSettings": [
+            { "name": "ASPNETCORE_ENVIRONMENT", "value": "Production"                       },
+            { "name": "Security__ApiKey",        "value": "[parameters('toolsApiKey')]"      },
+            { "name": "Ado__Organization",       "value": "[parameters('adoOrganization')]"  },
+            { "name": "Ado__Project",            "value": "[parameters('adoProject')]"       },
+            { "name": "Ado__Pat",                "value": "[parameters('adoPat')]"           },
+            { "name": "Ado__Branch",             "value": "main"                            }
+          ]
+        }
+      }
     }
 
   ],
@@ -210,32 +278,42 @@
     "aiServicesEndpoint": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('aiServicesName')), '2023-05-01').endpoint]",
-      "metadata": { "description": "Use this as AzureAI:Endpoint in dotnet user-secrets." }
+      "metadata": { "description": "Use this as AzureAI:Endpoint in dotnet user-secrets (direct mode only). For agent mode use openAiProjectEndpoint instead." }
     },
     "aiServicesKey": {
       "type": "string",
       "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('aiServicesName')), '2023-05-01').key1]",
-      "metadata": { "description": "Use this as AzureAI:ApiKey in dotnet user-secrets." }
+      "metadata": { "description": "Use this as AzureAI:ApiKey in dotnet user-secrets (both direct mode and agent mode)." }
     },
     "gptDeploymentName": {
       "type": "string",
       "value": "[variables('gptDeployment')]",
-      "metadata": { "description": "Use this as AzureAI:DeploymentName in dotnet user-secrets." }
+      "metadata": { "description": "Use this as AzureAI:DeploymentName in dotnet user-secrets (direct mode only)." }
+    },
+    "openAiProjectEndpoint": {
+      "type": "string",
+      "value": "[concat('https://', variables('aiServicesName'), '.openai.azure.com/openai')]",
+      "metadata": { "description": "Use this as AzureAI:ProjectEndpoint in dotnet user-secrets (agent mode only, when AzureAI:UseAgent is true)." }
     },
     "searchEndpoint": {
       "type": "string",
       "value": "[concat('https://', variables('searchName'), '.search.windows.net')]",
-      "metadata": { "description": "Use this as -SearchUrl when running scripts/index-repo.ps1." }
+      "metadata": { "description": "Use this as AzureSearch:Endpoint in dotnet user-secrets AND as -SearchUrl when running scripts/index-repo.ps1." }
     },
     "searchAdminKey": {
       "type": "string",
       "value": "[listAdminKeys(resourceId('Microsoft.Search/searchServices', variables('searchName')), '2023-11-01').primaryKey]",
-      "metadata": { "description": "Use this as -SearchKey when running scripts/index-repo.ps1." }
+      "metadata": { "description": "Use this as AzureSearch:ApiKey in dotnet user-secrets AND as -SearchKey when running scripts/index-repo.ps1." }
     },
     "foundryProjectName": {
       "type": "string",
       "value": "[variables('projectName')]",
-      "metadata": { "description": "Open ai.azure.com, select this project, then go to Agents to create the backlog2spec-agent." }
+      "metadata": { "description": "Open ai.azure.com, select this project, then go to Agents to create the backlog2spec-agent and copy its ID as AzureAI:AssistantId." }
+    },
+    "toolsApiUrl": {
+      "type": "string",
+      "value": "[concat('https://', variables('toolsApiName'), '.azurewebsites.net')]",
+      "metadata": { "description": "Set this as toolsApi.baseUrl in backlog-2-spec.json. Then deploy Backlog2SpecAgent.Tools to this App Service." }
     }
   }
 }

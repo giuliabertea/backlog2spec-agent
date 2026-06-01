@@ -102,9 +102,9 @@ There are two separate configuration sources:
 
 Direct mode:
 ```
-AzureAI:Endpoint        → LLM service URL
-AzureAI:ApiKey          → LLM API key
-AzureAI:DeploymentName  → e.g. "gpt-4o"
+AzureAI:Endpoint        → LLM service URL (ARM output: aiServicesEndpoint)
+AzureAI:ApiKey          → LLM API key   (ARM output: aiServicesKey)
+AzureAI:DeploymentName  → e.g. "gpt-4o" (ARM output: gptDeploymentName)
 AzureAI:EndpointType    → "AzureOpenAI" or "AzureFoundry"
 Ado:Pat                 → Azure DevOps Personal Access Token
 ```
@@ -112,14 +112,14 @@ Ado:Pat                 → Azure DevOps Personal Access Token
 Agent mode (add these):
 ```
 AzureAI:UseAgent        → "true"
-AzureAI:ProjectEndpoint → Azure OpenAI base URL (https://<resource>.openai.azure.com/openai)
-AzureAI:AssistantId     → Assistant ID from Azure OpenAI Studio
-AzureAI:ToolsApiKey     → Shared secret for the Tools API
-AzureSearch:Endpoint    → Azure AI Search service URL (https://<name>.search.windows.net)
-AzureSearch:ApiKey      → Azure AI Search admin key
+AzureAI:ProjectEndpoint → https://<resource>.openai.azure.com/openai  (ARM output: openAiProjectEndpoint)
+AzureAI:AssistantId     → Assistant ID from Azure OpenAI Studio (create manually after deploy)
+AzureAI:ToolsApiKey     → Shared secret for the Tools API (must match toolsApiKey ARM parameter)
+AzureSearch:Endpoint    → Azure AI Search URL  (ARM output: searchEndpoint)
+AzureSearch:ApiKey      → Azure AI Search admin key  (ARM output: searchAdminKey)
 AzureSearch:IndexName   → Index name (default: "codebase-chunks")
 ```
-Note: `toolsApi.baseUrl` (the Tools API HTTP endpoint) is read from `backlog-2-spec.json`, not from user secrets.
+Note: `toolsApi.baseUrl` is read from `backlog-2-spec.json`, not from user secrets. Set it to the ARM output `toolsApiUrl`.
 Set via: `dotnet user-secrets set "AzureAI:Endpoint" "https://..."`
 
 **2. Project config file (`backlog-2-spec.json`):**

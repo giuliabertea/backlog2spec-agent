@@ -76,7 +76,11 @@ az group create --name b2s-rg --location eastus
 az deployment group create \
   --resource-group b2s-rg \
   --template-file infra/azuredeploy.json \
-  --parameters prefix=b2s location=eastus
+  --parameters prefix=b2s location=eastus \
+               toolsApiKey=<your-tools-api-key> \
+               adoOrganization=https://dev.azure.com/your-org \
+               adoProject=YourProject \
+               adoPat=<your-ado-pat>
 
 # Read the outputs — you will need these values when setting secrets
 az deployment group show \
@@ -94,18 +98,24 @@ New-AzResourceGroupDeployment `
   -ResourceGroupName b2s-rg `
   -TemplateFile infra/azuredeploy.json `
   -prefix b2s `
-  -location eastus
+  -location eastus `
+  -toolsApiKey (Read-Host -AsSecureString "Tools API key") `
+  -adoOrganization "https://dev.azure.com/your-org" `
+  -adoProject "YourProject" `
+  -adoPat (Read-Host -AsSecureString "ADO PAT")
 
 (Get-AzResourceGroupDeployment -ResourceGroupName b2s-rg -Name azuredeploy).Outputs
 ```
 
 ### 3. Deploy from the Azure Portal
 
-Go to **portal.azure.com → Deploy a custom template → Build your own template in the editor**, paste `infra/azuredeploy.json`, fill in `prefix` and `location`, then deploy.
+Go to **portal.azure.com → Deploy a custom template → Build your own template in the editor**, paste `infra/azuredeploy.json`, fill in `prefix`, `location`, and the `toolsApiKey`/`adoPat` secrets, then deploy.
 
 > **GPT-4o regions:** `eastus`, `eastus2`, `swedencentral`, `australiaeast`, `westus`, `westus3`. Use the same region for all resources.
 
 > **Search SKU:** `free` works for small repos (≤ 50 MB, 1 per subscription). Use `basic` for a real codebase.
+
+> **Tools API parameters** (`toolsApiKey`, `adoOrganization`, `adoProject`, `adoPat`) can be left empty at deploy time and set later via the App Service → Configuration blade in the Azure portal.
 
 ### Create the Azure OpenAI Assistant
 
@@ -213,7 +223,7 @@ dotnet user-secrets set "AzureSearch:IndexName"   "codebase-chunks"
 
 > `toolsApi.baseUrl` is read from `backlog-2-spec.json`, not from secrets — set it in the config file.
 
-> If you used the ARM template, copy `aiServicesEndpoint`, `aiServicesKey`, and `gptDeploymentName` directly from the deployment outputs.
+> If you used the ARM template: direct mode → copy `aiServicesEndpoint` (→ `AzureAI:Endpoint`), `aiServicesKey` (→ `AzureAI:ApiKey`), `gptDeploymentName` (→ `AzureAI:DeploymentName`). Agent mode → use `openAiProjectEndpoint` (→ `AzureAI:ProjectEndpoint`) instead of `aiServicesEndpoint`, and copy `toolsApiUrl` into `toolsApi.baseUrl` in `backlog-2-spec.json`.
 
 ### Add the project config file (optional but recommended)
 
