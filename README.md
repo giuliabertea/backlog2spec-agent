@@ -55,6 +55,11 @@ SSO, session timeout, password reset
 ```
 
 ---
+## Architecture Overview
+
+![Architecture Diagram](architecture.svg)
+
+---
 
 ## Azure environment setup
 
