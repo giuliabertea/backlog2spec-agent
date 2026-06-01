@@ -98,7 +98,7 @@ public sealed class SpecGeneratorAgent : ISpecGeneratorAgent
         throw new LlmFormatException(lastRaw, lastException);
     }
 
-    private string BuildPrompt(EnrichedTicket enriched, AgentConfig config, IReadOnlyList<CodeFileDto> codebaseContext)
+    private string BuildPrompt(EnrichedTicket enriched, BacklogConfig config, IReadOnlyList<CodeFileDto> codebaseContext)
     {
         var codebaseContextText = codebaseContext.Count > 0
             ? string.Join("\n\n", codebaseContext.Select(f => $"File: {f.Path}\n---\n{f.Content}"))

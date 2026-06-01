@@ -11,15 +11,26 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-static AiEndpointType ParseEndpointType(string? raw) => raw switch
-{
-    null or "" or "AzureOpenAI" => AiEndpointType.AzureOpenAI,
-    "AzureFoundry" => AiEndpointType.AzureFoundry,
-    _ => throw new InvalidOperationException(
-        $"Unknown AzureAI:EndpointType value '{raw}'. Valid values are: AzureOpenAI, AzureFoundry.")
-};
-
 bool isMock = args.Contains("--mock");
+
+// Load project config file early — toolsApi.baseUrl is needed before DI setup.
+BacklogConfig fileConfig;
+if (isMock)
+{
+    fileConfig = new BacklogConfig();
+}
+else
+{
+    try
+    {
+        fileConfig = await new ConfigLoader().LoadAsync();
+    }
+    catch (ConfigException ex)
+    {
+        Console.Error.WriteLine($"Configuration error: {ex.Message}");
+        return 1;
+    }
+}
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, cfg) =>
@@ -53,10 +64,13 @@ var host = Host.CreateDefaultBuilder(args)
             {
                 var projectEndpoint = config["AzureAI:ProjectEndpoint"]
                     ?? throw new InvalidOperationException("AzureAI:ProjectEndpoint secret is missing when AzureAI:UseAgent is true.");
-                var agentId = config["AzureAI:AgentId"]
-                    ?? throw new InvalidOperationException("AzureAI:AgentId secret is missing when AzureAI:UseAgent is true.");
-                var toolsBaseUrl = config["AzureAI:ToolsBaseUrl"]
-                    ?? throw new InvalidOperationException("AzureAI:ToolsBaseUrl secret is missing when AzureAI:UseAgent is true.");
+                var assistantId = config["AzureAI:AssistantId"]
+                    ?? throw new InvalidOperationException("AzureAI:AssistantId secret is missing when AzureAI:UseAgent is true.");
+
+                var toolsBaseUrl = fileConfig.ToolsApi.BaseUrl;
+                if (string.IsNullOrWhiteSpace(toolsBaseUrl))
+                    throw new InvalidOperationException("toolsApi.baseUrl is missing in backlog-2-spec.json when AzureAI:UseAgent is true.");
+
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");
                 var searchEndpoint = config["AzureSearch:Endpoint"]
@@ -65,16 +79,16 @@ var host = Host.CreateDefaultBuilder(args)
                     ?? throw new InvalidOperationException("AzureSearch:ApiKey secret is missing when AzureAI:UseAgent is true.");
                 var searchIndexName = config["AzureSearch:IndexName"] ?? "codebase-chunks";
 
-                services.AddSingleton<IFoundryAgentClient>(sp =>
-                    new FoundryAgentClient(projectEndpoint, apiKey, agentId,
-                        sp.GetRequiredService<ILogger<FoundryAgentClient>>()));
+                services.AddSingleton<IAssistantClient>(sp =>
+                    new AssistantClient(projectEndpoint, apiKey, assistantId,
+                        sp.GetRequiredService<ILogger<AssistantClient>>()));
                 services.AddSingleton<ISpecGeneratorAgent>(sp =>
-                    new FoundrySpecGeneratorAgent(
-                        sp.GetRequiredService<IFoundryAgentClient>(),
+                    new AssistantSpecGeneratorAgent(
+                        sp.GetRequiredService<IAssistantClient>(),
                         sp.GetRequiredService<ConfigLoader>(),
                         toolsBaseUrl, toolsApiKey,
                         searchEndpoint, searchApiKey, searchIndexName,
-                        sp.GetRequiredService<ILogger<FoundrySpecGeneratorAgent>>()));
+                        sp.GetRequiredService<ILogger<AssistantSpecGeneratorAgent>>()));
                 services.AddSingleton<IHierarchyFetcher>(
                     _ => new ToolsApiHierarchyFetcher(toolsBaseUrl, toolsApiKey));
             }
@@ -82,8 +96,7 @@ var host = Host.CreateDefaultBuilder(args)
             {
                 var endpoint = config["AzureAI:Endpoint"] ?? throw new InvalidOperationException("AzureAI:Endpoint secret is missing.");
                 var deploymentName = config["AzureAI:DeploymentName"] ?? throw new InvalidOperationException("AzureAI:DeploymentName secret is missing.");
-                var endpointType = ParseEndpointType(config["AzureAI:EndpointType"]);
-                var kernel = new KernelFactory().Build(endpoint, apiKey, deploymentName, endpointType);
+                var kernel = new KernelFactory().Build(endpoint, apiKey, deploymentName);
 
                 services.AddSingleton(kernel);
                 services.AddSingleton<IEnrichmentAgent, EnrichmentAgent>();

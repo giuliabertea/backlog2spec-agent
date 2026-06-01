@@ -200,6 +200,19 @@ dotnet user-secrets set "AzureAI:AssistantId"     "asst_..."
 dotnet user-secrets set "Ado:Pat"                 "your-ado-pat"
 ```
 
+Agent mode adds these secrets (`AzureAI:UseAgent = true`):
+
+```bash
+dotnet user-secrets set "AzureAI:UseAgent"        "true"
+dotnet user-secrets set "AzureAI:ProjectEndpoint" "https://<resource>.openai.azure.com/openai"
+dotnet user-secrets set "AzureAI:ToolsApiKey"     "your-tools-api-key"
+dotnet user-secrets set "AzureSearch:Endpoint"    "https://<name>.search.windows.net"
+dotnet user-secrets set "AzureSearch:ApiKey"      "your-search-admin-key"
+dotnet user-secrets set "AzureSearch:IndexName"   "codebase-chunks"
+```
+
+> `toolsApi.baseUrl` is read from `backlog-2-spec.json`, not from secrets — set it in the config file.
+
 > If you used the ARM template, copy `aiServicesEndpoint`, `aiServicesKey`, and `gptDeploymentName` directly from the deployment outputs.
 
 ### Add the project config file (optional but recommended)
@@ -211,14 +224,21 @@ Place `backlog-2-spec.json` in the root of **your project** (not the Backlog2Spe
   "project": {
     "name": "MyService",
     "language": "C#",
-    "framework": ".NET 8 / ASP.NET Core",
+    "framework": ".NET 8",
     "testFramework": "xUnit",
-    "architecture": "Clean Architecture"
+    "architecture": "Clean Architecture",
+    "description": "Optional short description of the project"
   },
   "conventions": {
     "naming": "PascalCase classes, camelCase fields",
     "folderStructure": "Feature-based",
-    "diPattern": "Constructor injection"
+    "specStyle": "Gherkin",
+    "diPattern": "Constructor injection",
+    "errorHandling": "Result<T> pattern, no exceptions for business logic",
+    "testing": "AAA pattern, no mocks on domain, integration tests for infrastructure"
+  },
+  "toolsApi": {
+    "baseUrl": "https://your-tools-api.azurewebsites.net"
   },
   "ado": {
     "organization": "https://dev.azure.com/your-org",
@@ -226,11 +246,13 @@ Place `backlog-2-spec.json` in the root of **your project** (not the Backlog2Spe
     "repoName": "YourRepo",
     "branch": "main"
   },
-  "devRulesFile": "dev-rules.md"
+  "devRulesFiles": [
+    "dev-rules.md"
+  ]
 }
 ```
 
-`ado.organization` and `ado.project` are required when the file is present. `repoName` and `branch` enable source-file context fetching from your ADO repo. `devRulesFile` injects team-specific rules into every prompt (see [Project rules file](#project-rules-file)).
+`ado.organization` and `ado.project` are required when the file is present. `repoName` and `branch` enable source-file context fetching from your ADO repo. `devRulesFiles` lists one or more markdown files whose content is concatenated and injected into every prompt (see [Project rules files](#project-rules-file)). `toolsApi.baseUrl` is required when running in agent mode (`AzureAI:UseAgent = true`).
 
 Commit this file — it contains no secrets.
 
@@ -297,7 +319,7 @@ Start with the feature spec, confirm your understanding, then begin PBI 01.
 
 ### Project rules file
 
-`devRulesFile` points to a markdown file that gets injected verbatim into every prompt. Use it for constraints that are too nuanced for the structured config fields.
+`devRulesFiles` lists one or more markdown files that get injected verbatim into every prompt (concatenated with a blank line between files). Use them for constraints that are too nuanced for the structured config fields.
 
 ```markdown
 # dev-rules.md
@@ -310,7 +332,7 @@ Start with the feature spec, confirm your understanding, then begin PBI 01.
 - Commands and queries follow MediatR: VerbNounCommand / VerbNounCommandHandler.
 ```
 
-Reference it in `backlog-2-spec.json` with `"devRulesFile": "dev-rules.md"` and commit both files.
+Reference it in `backlog-2-spec.json` with `"devRulesFiles": ["dev-rules.md"]` and commit both files. To use multiple rules files, add more entries to the list — their contents are concatenated in order.
 
 ---
 
@@ -319,12 +341,13 @@ Reference it in `backlog-2-spec.json` with `"devRulesFile": "dev-rules.md"` and 
 | Error | Cause | Fix |
 |---|---|---|
 | `Missing required field: ado.organization` | Config file incomplete | Add the missing field |
-| `Configuration error: devRulesFile not found` | Path does not exist | Check the path is relative to `backlog-2-spec.json` |
+| `Configuration error: devRulesFiles entry not found` | Path does not exist | Check each path in `devRulesFiles` is relative to `backlog-2-spec.json` |
 | `Authentication error: Failed to connect to Azure DevOps` | Invalid PAT or org URL | Re-set `Ado:Pat` and verify `ado.organization` |
 | `Authentication error: PAT expired or wrong scope` | PAT expired | Generate a new PAT with Work Items: Read |
 | `AI response error: LLM returned invalid JSON` | Model returned malformed JSON | Check deployment name and quota; try again |
 | `Unexpected error: AzureAI:Endpoint secret is missing` | User secrets not set | Run the secrets setup commands in the installation guide |
 | `Unexpected error: AzureAI:AssistantId secret is missing` | Assistant ID not set | Copy the ID from Azure OpenAI Studio and set the secret |
+| `toolsApi.baseUrl is missing in backlog-2-spec.json` | Agent mode but no URL set | Add `toolsApi.baseUrl` to `backlog-2-spec.json` |
 | `No manifest file found` | Missing `.config/dotnet-tools.json` | Run `dotnet new tool-manifest` in your project root |
 | `POST /threads → 401` | Wrong API key | Verify `AzureAI:ApiKey` matches the key under your Azure OpenAI resource |
 | `POST /threads → 404` | Wrong endpoint format | Ensure `AzureAI:Endpoint` points to your Azure OpenAI resource URL |

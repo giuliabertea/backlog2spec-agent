@@ -2,20 +2,29 @@
   "project": {
     "name": "CCC",
     "language": "C#",
-    "framework": ".NET 8 / ASP.NET Core",
+    "framework": ".NET 8",
     "testFramework": "xUnit",
-    "architecture": "Clean Architecture"
+    "architecture": "Clean Architecture",
+    "description": "Customer care platform for OVH"
   },
   "conventions": {
-    "naming": "PascalCase classes, camelCase private fields",
+    "naming": "PascalCase classes, camelCase fields",
     "folderStructure": "Feature-based",
     "specStyle": "Gherkin",
-    "diPattern": "Constructor injection"
+    "diPattern": "Constructor injection",
+    "errorHandling": "Result<T> pattern, no exceptions for business logic",
+    "testing": "AAA pattern, no mocks on domain, integration tests for infrastructure"
+  },
+  "toolsApi": {
+    "baseUrl": "https://backlog2spec-tools.azurewebsites.net"
   },
   "ado": {
     "organization": "https://dev.azure.com/your-org",
     "project": "CCC",
     "repoName": null,
     "branch": null
-  }
+  },
+  "devRulesFiles": [
+    "CCCRules.md"
+  ]
 }

@@ -20,17 +20,17 @@ public sealed class ConfigLoader
         _startDirectory = startDirectory ?? Directory.GetCurrentDirectory();
     }
 
-    public async Task<AgentConfig> LoadAsync(CancellationToken ct = default)
+    public async Task<BacklogConfig> LoadAsync(CancellationToken ct = default)
     {
         var configPath = FindConfigFile();
         if (configPath is null)
-            return new AgentConfig();
+            return new BacklogConfig();
 
-        AgentConfig config;
+        BacklogConfig config;
         try
         {
             await using var stream = File.OpenRead(configPath);
-            config = await JsonSerializer.DeserializeAsync<AgentConfig>(stream, JsonOptions, ct)
+            config = await JsonSerializer.DeserializeAsync<BacklogConfig>(stream, JsonOptions, ct)
                      ?? throw new ConfigException($"'{configPath}' is empty or null.");
         }
         catch (JsonException ex)
@@ -43,18 +43,29 @@ public sealed class ConfigLoader
         return config;
     }
 
-    private static async Task LoadDevRulesAsync(AgentConfig config, string configPath, CancellationToken ct)
+    private static async Task LoadDevRulesAsync(BacklogConfig config, string configPath, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(config.DevRulesFile))
+        if (config.DevRulesFiles.Count == 0)
             return;
 
         var configDir = Path.GetDirectoryName(configPath) ?? Directory.GetCurrentDirectory();
-        var rulesPath = Path.GetFullPath(config.DevRulesFile, configDir);
+        var parts = new List<string>();
 
-        if (!File.Exists(rulesPath))
-            throw new ConfigException($"devRulesFile not found: '{rulesPath}'");
+        foreach (var file in config.DevRulesFiles)
+        {
+            if (string.IsNullOrWhiteSpace(file))
+                continue;
 
-        config.DevRulesContent = await File.ReadAllTextAsync(rulesPath, ct);
+            var rulesPath = Path.GetFullPath(file, configDir);
+
+            if (!File.Exists(rulesPath))
+                throw new ConfigException($"devRulesFiles entry not found: '{rulesPath}'");
+
+            parts.Add(await File.ReadAllTextAsync(rulesPath, ct));
+        }
+
+        if (parts.Count > 0)
+            config.DevRulesContent = string.Join("\n\n", parts);
     }
 
     private string? FindConfigFile()
@@ -71,7 +82,7 @@ public sealed class ConfigLoader
         return null;
     }
 
-    private static void ValidateRequiredFields(AgentConfig config)
+    private static void ValidateRequiredFields(BacklogConfig config)
     {
         if (string.IsNullOrWhiteSpace(config.Ado.Organization))
             throw new ConfigException("Missing required field: ado.organization");

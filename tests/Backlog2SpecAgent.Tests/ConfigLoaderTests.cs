@@ -87,33 +87,33 @@ public class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_WithDevRulesFile_LoadsRulesContent()
+    public async Task LoadAsync_WithDevRulesFiles_LoadsAndConcatenatesContent()
     {
-        var rulesPath = Path.Combine(_tempDir, "rules.md");
-        File.WriteAllText(rulesPath, "No AutoMapper.", Encoding.UTF8);
+        File.WriteAllText(Path.Combine(_tempDir, "rules1.md"), "No AutoMapper.", Encoding.UTF8);
+        File.WriteAllText(Path.Combine(_tempDir, "rules2.md"), "Use Result<T>.", Encoding.UTF8);
 
         WriteConfig(_tempDir, $$"""
             {
               "project": { "name": "MyApp" },
               "ado": { "organization": "https://dev.azure.com/myorg", "project": "MyProject" },
-              "devRulesFile": "rules.md"
+              "devRulesFiles": ["rules1.md", "rules2.md"]
             }
             """);
 
         var loader = new ConfigLoader(_tempDir);
         var config = await loader.LoadAsync();
 
-        Assert.Equal("No AutoMapper.", config.DevRulesContent);
+        Assert.Equal("No AutoMapper.\n\nUse Result<T>.", config.DevRulesContent);
     }
 
     [Fact]
-    public async Task LoadAsync_DevRulesFileMissing_ThrowsConfigException()
+    public async Task LoadAsync_DevRulesFilesMissing_ThrowsConfigException()
     {
         WriteConfig(_tempDir, """
             {
               "project": { "name": "MyApp" },
               "ado": { "organization": "https://dev.azure.com/myorg", "project": "MyProject" },
-              "devRulesFile": "does-not-exist.md"
+              "devRulesFiles": ["does-not-exist.md"]
             }
             """);
 

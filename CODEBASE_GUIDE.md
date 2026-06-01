@@ -113,13 +113,13 @@ Agent mode (add these):
 ```
 AzureAI:UseAgent        → "true"
 AzureAI:ProjectEndpoint → Azure OpenAI base URL (https://<resource>.openai.azure.com/openai)
-AzureAI:AgentId         → Assistant ID from Azure OpenAI Studio
-AzureAI:ToolsBaseUrl    → HTTP endpoint of the Tools API
+AzureAI:AssistantId     → Assistant ID from Azure OpenAI Studio
 AzureAI:ToolsApiKey     → Shared secret for the Tools API
 AzureSearch:Endpoint    → Azure AI Search service URL (https://<name>.search.windows.net)
 AzureSearch:ApiKey      → Azure AI Search admin key
 AzureSearch:IndexName   → Index name (default: "codebase-chunks")
 ```
+Note: `toolsApi.baseUrl` (the Tools API HTTP endpoint) is read from `backlog-2-spec.json`, not from user secrets.
 Set via: `dotnet user-secrets set "AzureAI:Endpoint" "https://..."`
 
 **2. Project config file (`backlog-2-spec.json`):**
@@ -211,21 +211,22 @@ load prompt template → fill variables → call LLM → parse JSON → retry up
 
 **Key files:**
 - [ConfigLoader.cs](src/Backlog2SpecAgent.Cli/Config/ConfigLoader.cs)
-- [AgentConfig.cs](src/Backlog2SpecAgent.Cli/Config/AgentConfig.cs)
+- [BacklogConfig.cs](src/Backlog2SpecAgent.Cli/Config/BacklogConfig.cs)
 
-`ConfigLoader.LoadAsync()` walks up the directory tree from CWD looking for `backlog-2-spec.json`. It deserializes it into `AgentConfig` and validates required fields. If `devRulesFile` is specified, it reads that file's content and injects it into `AgentConfig.DevRulesContent`.
+`ConfigLoader.LoadAsync()` walks up the directory tree from CWD looking for `backlog-2-spec.json`. It deserializes it into `BacklogConfig` and validates required fields. If `devRulesFile` is specified, it reads that file's content and injects it into `BacklogConfig.DevRulesContent`.
 
 **Config shape:**
 ```json
 {
-  "project": { "name": "", "language": "", "framework": "", "testFramework": "", "architecture": "" },
-  "conventions": { "naming": "", "folderStructure": "", "specStyle": "", "diPattern": "" },
-  "ado": { "organization": "", "project": "", "repoName": "", "branch": "" },
-  "devRulesFile": "path/to/rules.md"
+  "project": { "name": "", "language": "", "framework": "", "testFramework": "", "architecture": "", "description": null },
+  "conventions": { "naming": null, "folderStructure": null, "specStyle": null, "diPattern": null, "errorHandling": null, "testing": null },
+  "toolsApi": { "baseUrl": "" },
+  "ado": { "organization": "", "project": "", "repoName": null, "branch": null },
+  "devRulesFiles": ["path/to/rules.md"]
 }
 ```
 
-`AgentConfig` is the single config object passed through the entire pipeline. It is immutable (`init` properties).
+`BacklogConfig` is the single config object passed through the entire pipeline. It is immutable (`init` properties). All `ConventionsConfig` fields are nullable — missing values are simply omitted from the payload. Multiple dev rules files are concatenated with a blank line separator before injection.
 
 ---
 
@@ -299,7 +300,7 @@ User: dotnet backlog-2-spec spec 12345
        ▼
   SpecCommand.ExecuteAsync()
   ├── ConfigLoader.LoadAsync()
-  │     └── Reads backlog-2-spec.json → AgentConfig
+  │     └── Reads backlog-2-spec.json → BacklogConfig
   │
   ├── AdoClient.GetWorkItemAsync(12345)
   │     └── VssConnection → ADO API → WorkItemDto
@@ -413,7 +414,7 @@ Both agents retry up to 2 times (3 total attempts) on `JsonException`. If all at
 
 ### Prompt template variables
 
-Prompts use `{{VariableName}}` placeholders replaced via `string.Replace()`. Variables are injected from `AgentConfig` and the current work item. Dev rules and codebase context are injected as optional blocks only when non-empty.
+Prompts use `{{VariableName}}` placeholders replaced via `string.Replace()`. Variables are injected from `BacklogConfig` and the current work item. Dev rules and codebase context are injected as optional blocks only when non-empty.
 
 ### Custom exception hierarchy
 
@@ -473,7 +474,7 @@ All domain errors are typed exceptions rather than generic `Exception`. This all
 1. [README.md](README.md) — setup instructions and CLI usage examples
 2. [Program.cs](src/Backlog2SpecAgent.Cli/Program.cs) — DI wiring, secret loading, CLI setup (~80 lines, very readable)
 3. [Commands/SpecCommand.cs](src/Backlog2SpecAgent.Cli/Commands/SpecCommand.cs) — the full orchestration flow; read `ExecuteAsync()` first
-4. [Config/AgentConfig.cs](src/Backlog2SpecAgent.Cli/Config/AgentConfig.cs) — the shape of all config data
+4. [Config/BacklogConfig.cs](src/Backlog2SpecAgent.Cli/Config/BacklogConfig.cs) — the shape of all config data
 5. [Models/WorkItemDto.cs](src/Backlog2SpecAgent.Cli/Models/WorkItemDto.cs) — what an ADO work item looks like in code
 6. [Agents/EnrichmentAgent.cs](src/Backlog2SpecAgent.Cli/Agents/EnrichmentAgent.cs) — the first LLM call
 7. [Prompts/enrichment.txt](src/Backlog2SpecAgent.Cli/Prompts/enrichment.txt) — what the enrichment LLM is actually told
@@ -487,7 +488,7 @@ All domain errors are typed exceptions rather than generic `Exception`. This all
 |---|---|
 | [Program.cs](src/Backlog2SpecAgent.Cli/Program.cs) | Bootstraps everything; shows DI wiring and secret loading in one place |
 | [Commands/SpecCommand.cs](src/Backlog2SpecAgent.Cli/Commands/SpecCommand.cs) | Full pipeline orchestration and all error handling |
-| [Config/AgentConfig.cs](src/Backlog2SpecAgent.Cli/Config/AgentConfig.cs) | Defines every configurable field the app reads |
+| [Config/BacklogConfig.cs](src/Backlog2SpecAgent.Cli/Config/BacklogConfig.cs) | Defines every configurable field the app reads |
 | [Config/ConfigLoader.cs](src/Backlog2SpecAgent.Cli/Config/ConfigLoader.cs) | Shows how config is discovered and validated at startup |
 | [Ado/AdoClient.cs](src/Backlog2SpecAgent.Cli/Ado/AdoClient.cs) | All Azure DevOps integration in one file |
 | [Agents/EnrichmentAgent.cs](src/Backlog2SpecAgent.Cli/Agents/EnrichmentAgent.cs) | First AI step; shows the retry pattern and JSON extraction |

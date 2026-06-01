@@ -85,7 +85,10 @@
       "Bash(Get-ChildItem -Path . -Directory)",
       "Bash(Select-Object Name)",
       "Bash(Remove-Item \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\src\\\\Backlog2SpecAgent.Cli\\\\Agents\\\\MockEnrichmentAgent.cs\" -Force)",
-      "Bash(Remove-Item \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\src\\\\Backlog2SpecAgent.Cli\\\\Agents\\\\MockCodebaseContextAgent.cs\" -Force)"
+      "Bash(Remove-Item \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\\\\src\\\\Backlog2SpecAgent.Cli\\\\Agents\\\\MockCodebaseContextAgent.cs\" -Force)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\gbert\\\\Desktop\\\\Giulia\\\\Projects\\\\Backlog2SpecAgent\" -Recurse -File -Name)",
+      "Bash(xargs grep -l \"backlog-2-spec\\\\|Config\\\\|Settings\")",
+      "Bash(xargs grep -l \"AgentConfig\\\\|config\\\\.Project\\\\|config\\\\.Conventions\\\\|config\\\\.Ado\\\\|config\\\\.DevRules\")"
     ]
   }
 }

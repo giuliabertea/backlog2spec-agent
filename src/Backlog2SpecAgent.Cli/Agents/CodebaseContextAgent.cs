@@ -31,7 +31,7 @@ public sealed class CodebaseContextAgent : ICodebaseContextAgent
     }
 
     public async Task<IReadOnlyList<CodeFileDto>> FetchRelevantFilesAsync(
-        WorkItemDto workItem, AgentConfig config, CancellationToken ct = default)
+        WorkItemDto workItem, BacklogConfig config, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(config.Ado.RepoName))
             return [];
@@ -81,7 +81,7 @@ public sealed class CodebaseContextAgent : ICodebaseContextAgent
     }
 
     private async Task<IReadOnlyList<string>> ListFilePathsAsync(
-        AgentConfig config, string branch, CancellationToken ct)
+        BacklogConfig config, string branch, CancellationToken ct)
     {
         var url = $"{config.Ado.Organization}/{config.Ado.Project}/_apis/git/repositories/{config.Ado.RepoName}/items" +
                   $"?recursionLevel=full&versionDescriptor.version={Uri.EscapeDataString(branch)}&versionDescriptor.versionType=branch&api-version=7.1";
@@ -108,7 +108,7 @@ public sealed class CodebaseContextAgent : ICodebaseContextAgent
     }
 
     private async Task<CodeFileDto?> FetchFileContentAsync(
-        AgentConfig config, string branch, string filePath, CancellationToken ct)
+        BacklogConfig config, string branch, string filePath, CancellationToken ct)
     {
         var encodedPath = Uri.EscapeDataString(filePath);
         var url = $"{config.Ado.Organization}/{config.Ado.Project}/_apis/git/repositories/{config.Ado.RepoName}/items" +

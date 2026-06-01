@@ -6,5 +6,5 @@ namespace Backlog2SpecAgent.Cli.Agents;
 public interface ICodebaseContextAgent
 {
     Task<IReadOnlyList<CodeFileDto>> FetchRelevantFilesAsync(
-        WorkItemDto workItem, AgentConfig config, CancellationToken ct = default);
+        WorkItemDto workItem, BacklogConfig config, CancellationToken ct = default);
 }

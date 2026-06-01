@@ -31,7 +31,7 @@ public sealed class EnrichmentAgent : IEnrichmentAgent
 
     public async Task<EnrichedTicket> EnrichAsync(
         WorkItemDto workItem,
-        AgentConfig config,
+        BacklogConfig config,
         IReadOnlyList<CodeFileDto> codebaseContext,
         CancellationToken ct = default)
     {
@@ -83,7 +83,7 @@ public sealed class EnrichmentAgent : IEnrichmentAgent
         throw new LlmFormatException(lastRaw, lastException);
     }
 
-    private string BuildPrompt(WorkItemDto workItem, AgentConfig config, IReadOnlyList<CodeFileDto> codebaseContext)
+    private string BuildPrompt(WorkItemDto workItem, BacklogConfig config, IReadOnlyList<CodeFileDto> codebaseContext)
     {
         var codebaseContextText = codebaseContext.Count > 0
             ? string.Join("\n\n", codebaseContext.Select(f => $"File: {f.Path}\n---\n{f.Content}"))

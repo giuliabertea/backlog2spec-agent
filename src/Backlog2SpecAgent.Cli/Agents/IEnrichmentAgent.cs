@@ -8,7 +8,7 @@ public interface IEnrichmentAgent
 {
     Task<EnrichedTicket> EnrichAsync(
         WorkItemDto workItem,
-        AgentConfig config,
+        BacklogConfig config,
         IReadOnlyList<CodeFileDto> codebaseContext,
         CancellationToken ct = default);
 }

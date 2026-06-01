@@ -5,10 +5,11 @@ using Backlog2SpecAgent.Cli.Config;
 using Backlog2SpecAgent.Cli.Infrastructure.AI;
 using Backlog2SpecAgent.Cli.Models;
 using Microsoft.Extensions.Logging;
+using JsonIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition;
 
 namespace Backlog2SpecAgent.Cli.Agents;
 
-public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
+public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
 {
     private const int MaxRetries = 2;
     private const string SearchApiVersion = "2023-11-01";
@@ -16,29 +17,30 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly IFoundryAgentClient _agentClient;
+    private readonly IAssistantClient _assistantClient;
     private readonly ConfigLoader _configLoader;
     private readonly HttpClient _toolsHttp;
     private readonly string _toolsBaseUrl;
     private readonly HttpClient _searchHttp;
     private readonly string _searchEndpoint;
     private readonly string _searchIndexName;
-    private readonly ILogger<FoundrySpecGeneratorAgent> _logger;
+    private readonly ILogger<AssistantSpecGeneratorAgent> _logger;
 
-    public FoundrySpecGeneratorAgent(
-        IFoundryAgentClient agentClient,
+    public AssistantSpecGeneratorAgent(
+        IAssistantClient assistantClient,
         ConfigLoader configLoader,
         string toolsBaseUrl,
         string toolsApiKey,
         string searchEndpoint,
         string searchApiKey,
         string searchIndexName,
-        ILogger<FoundrySpecGeneratorAgent> logger)
+        ILogger<AssistantSpecGeneratorAgent> logger)
     {
-        _agentClient = agentClient;
+        _assistantClient = assistantClient;
         _configLoader = configLoader;
         _toolsBaseUrl = toolsBaseUrl.TrimEnd('/');
         _toolsHttp = new HttpClient();
@@ -52,7 +54,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
 
     public async Task<GeneratedSpec> GenerateAsync(int workItemId, CancellationToken ct = default)
     {
-        _logger.LogInformation("Starting Foundry Agent spec generation for work item {WorkItemId}", workItemId);
+        _logger.LogInformation("Starting spec generation for work item {WorkItemId}", workItemId);
 
         // a. Fetch work item from Tools API
         var workItemJson = await FetchWorkItemAsync(workItemId, ct);
@@ -62,34 +64,34 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         var repoContext = await QueryAzureSearchAsync(title, ct);
 
         // c. Load project config (graceful fallback to defaults if no config file found)
-        var config = await _configLoader.LoadAsync(ct);
+        BacklogConfig config = await _configLoader.LoadAsync(ct);
 
-        // d. Build combined payload for the Foundry agent
+        // d. Build combined payload for the assistant
         var payload = BuildPayload(workItemJson, repoContext, config);
 
-        // e+f. Call the agent and parse the response, retrying on JSON errors
+        // e+f. Call the assistant and parse the response, retrying on JSON errors
         string lastRaw = string.Empty;
         JsonException? lastException = null;
 
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
-            lastRaw = await _agentClient.RunAsync(payload, ct);
-            _logger.LogDebug("Foundry Agent response size: {Chars} chars (attempt {Attempt})", lastRaw.Length, attempt + 1);
+            lastRaw = await _assistantClient.RunAsync(payload, ct);
+            _logger.LogDebug("Assistant response size: {Chars} chars (attempt {Attempt})", lastRaw.Length, attempt + 1);
 
             try
             {
                 var json = ExtractJson(lastRaw);
-                var foundrySpec = JsonSerializer.Deserialize<FoundrySpec>(json, JsonOptions);
-                if (foundrySpec is not null)
+                var spec = JsonSerializer.Deserialize<AssistantSpec>(json, JsonOptions);
+                if (spec is not null)
                 {
-                    _logger.LogInformation("Foundry Agent spec generation completed for work item {WorkItemId}", workItemId);
-                    return MapToGeneratedSpec(foundrySpec);
+                    _logger.LogInformation("Spec generation completed for work item {WorkItemId}", workItemId);
+                    return MapToGeneratedSpec(spec);
                 }
             }
             catch (JsonException ex)
             {
                 lastException = ex;
-                _logger.LogDebug("Foundry Agent attempt {Attempt} returned invalid JSON", attempt + 1);
+                _logger.LogDebug("Assistant attempt {Attempt} returned invalid JSON", attempt + 1);
             }
         }
 
@@ -167,7 +169,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         return string.Empty;
     }
 
-    private static string BuildPayload(string workItemJson, IReadOnlyList<RepoContextItem> repoContext, AgentConfig config)
+    private static string BuildPayload(string workItemJson, IReadOnlyList<RepoContextItem> repoContext, BacklogConfig config)
     {
         using var doc = JsonDocument.Parse(workItemJson);
         var workItem = doc.RootElement.Clone();
@@ -177,6 +179,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         {
             stack = BuildStack(config),
             architecture = config.Project.Architecture,
+            description = config.Project.Description,
             conventions = BuildConventions(config)
         };
         var repoContextValue = mapped.Length > 0 ? (object?)mapped : null;
@@ -200,7 +203,7 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         }, JsonOptions);
     }
 
-    private static string BuildStack(AgentConfig config)
+    private static string BuildStack(BacklogConfig config)
     {
         var parts = new[] { config.Project.Language, config.Project.Framework, config.Project.Architecture }
             .Where(s => !string.IsNullOrWhiteSpace(s))
@@ -208,28 +211,30 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         return parts.Length > 0 ? string.Join(", ", parts) : ".NET 8, Clean Architecture";
     }
 
-    private static string BuildConventions(AgentConfig config)
+    private static string BuildConventions(BacklogConfig config)
     {
         var parts = new[]
             {
                 config.Conventions.Naming,
                 config.Conventions.DiPattern,
                 config.Conventions.FolderStructure,
-                config.Conventions.SpecStyle
+                config.Conventions.SpecStyle,
+                config.Conventions.ErrorHandling,
+                config.Conventions.Testing
             }
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .ToArray();
         return string.Join("; ", parts);
     }
 
-    private static GeneratedSpec MapToGeneratedSpec(FoundrySpec foundrySpec) =>
+    private static GeneratedSpec MapToGeneratedSpec(AssistantSpec spec) =>
         new()
         {
-            Goal = foundrySpec.Goal,
-            Behaviour = foundrySpec.Behaviour,
-            EdgeCases = foundrySpec.EdgeCases,
-            OutOfScope = string.Join(", ", foundrySpec.OutOfScope),
-            FilesToChange = foundrySpec.FilesToChange
+            Goal = spec.Goal,
+            Behaviour = spec.Behaviour,
+            EdgeCases = spec.EdgeCases,
+            OutOfScope = string.Join(", ", spec.OutOfScope),
+            FilesToChange = spec.FilesToChange
                 .Select(f => $"{f.File}: {f.Change}")
                 .ToList()
         };
@@ -243,8 +248,8 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
 
     private sealed record RepoContextItem(string File, string Content);
 
-    // Matches the schema the Foundry Agent is configured to return (see README for portal setup).
-    private sealed class FoundrySpec
+    // Matches the schema the Azure OpenAI Assistant is configured to return (see README for portal setup).
+    private sealed class AssistantSpec
     {
         [JsonPropertyName("goal")]
         public string Goal { get; init; } = string.Empty;
@@ -259,10 +264,10 @@ public sealed class FoundrySpecGeneratorAgent : ISpecGeneratorAgent
         public List<string> OutOfScope { get; init; } = [];
 
         [JsonPropertyName("filesToChange")]
-        public List<FoundryFileChange> FilesToChange { get; init; } = [];
+        public List<AssistantFileChange> FilesToChange { get; init; } = [];
     }
 
-    private sealed class FoundryFileChange
+    private sealed class AssistantFileChange
     {
         [JsonPropertyName("file")]
         public string File { get; init; } = string.Empty;

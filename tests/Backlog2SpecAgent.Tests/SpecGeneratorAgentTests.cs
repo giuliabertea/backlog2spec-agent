@@ -62,12 +62,12 @@ public class SpecGeneratorAgentTests
         Assert.NotNull(spec);
     }
 
-    // --- MockFoundryAgentClient ---
+    // --- MockAssistantClient ---
 
     [Fact]
-    public async Task MockFoundryAgentClient_ReturnsValidJson()
+    public async Task MockAssistantClient_ReturnsValidJson()
     {
-        var client = new MockFoundryAgentClient();
+        var client = new MockAssistantClient();
         var raw = await client.RunAsync("any input");
         Assert.False(string.IsNullOrWhiteSpace(raw));
         // Must be parseable as a GeneratedSpec-shaped JSON object
@@ -76,9 +76,9 @@ public class SpecGeneratorAgentTests
     }
 
     [Fact]
-    public async Task MockFoundryAgentClient_IsDeterministic()
+    public async Task MockAssistantClient_IsDeterministic()
     {
-        var client = new MockFoundryAgentClient();
+        var client = new MockAssistantClient();
         var a = await client.RunAsync("msg1");
         var b = await client.RunAsync("msg2");
         Assert.Equal(a, b);

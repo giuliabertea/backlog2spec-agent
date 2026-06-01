@@ -9,7 +9,7 @@ namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
 // Endpoint: https://<resource>.openai.azure.com/openai
 // Auth: api-key header
 // API version: 2024-05-01-preview
-public sealed class FoundryAgentClient : IFoundryAgentClient
+public sealed class AssistantClient : IAssistantClient
 {
     private const string ApiVersion = "2024-05-01-preview";
     private const int MaxRateLimitRetries = 3;
@@ -19,24 +19,24 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
 
     private readonly string _baseUrl;
     private readonly string _apiKey;
-    private readonly string _agentId;
+    private readonly string _assistantId;
     private readonly HttpClient _http;
-    private readonly ILogger<FoundryAgentClient> _logger;
+    private readonly ILogger<AssistantClient> _logger;
 
-    public FoundryAgentClient(
+    public AssistantClient(
         string endpoint,
         string apiKey,
-        string agentId,
-        ILogger<FoundryAgentClient> logger)
+        string assistantId,
+        ILogger<AssistantClient> logger)
     {
         _baseUrl = endpoint.TrimEnd('/');
         _apiKey = apiKey;
-        _agentId = agentId;
+        _assistantId = assistantId;
         _http = new HttpClient();
         _logger = logger;
 
-        _logger.LogWarning("FoundryAgentClient initialised — endpoint: {Endpoint}, agentId: {AgentId}",
-            _baseUrl, _agentId);
+        _logger.LogWarning("AssistantClient initialised — endpoint: {Endpoint}, assistantId: {AssistantId}",
+            _baseUrl, _assistantId);
     }
 
     public async Task<string> RunAsync(string userMessage, CancellationToken ct = default)
@@ -102,7 +102,7 @@ public sealed class FoundryAgentClient : IFoundryAgentClient
 
     private async Task<string> CreateRunAsync(string threadId, CancellationToken ct)
     {
-        var payload = JsonSerializer.Serialize(new { assistant_id = _agentId });
+        var payload = JsonSerializer.Serialize(new { assistant_id = _assistantId });
         using var req = BuildRequest(HttpMethod.Post, $"threads/{threadId}/runs");
         req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 

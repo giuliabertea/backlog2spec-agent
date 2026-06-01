@@ -1,6 +1,6 @@
 namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
 
-public sealed class MockFoundryAgentClient : IFoundryAgentClient
+public sealed class MockAssistantClient : IAssistantClient
 {
     public Task<string> RunAsync(string userMessage, CancellationToken ct = default) =>
         Task.FromResult("""
