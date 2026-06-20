@@ -46,13 +46,34 @@ public sealed class OutputRenderer : IOutputRenderer
         AnsiConsole.MarkupLine("[bold blue]── Files to Change ──────────────────────────────[/]");
         foreach (var f in spec.FilesToChange)
         {
-            var colonIdx = f.IndexOf(':');
-            var line = colonIdx > 0
-                ? $"[bold white]  • {Markup.Escape(f[..colonIdx])}[/][white]:{Markup.Escape(f[(colonIdx + 1)..])}[/]"
-                : $"[white]  • {Markup.Escape(f)}[/]";
-            AnsiConsole.MarkupLine(line);
+            var badge = f.Confidence?.ToLowerInvariant() switch
+            {
+                "high"   => " [green]●[/]",
+                "medium" => " [yellow]●[/]",
+                "low"    => " [red]●[/]",
+                _        => string.Empty
+            };
+            AnsiConsole.MarkupLine($"[white]  • [bold]{Markup.Escape(f.File)}[/]: {Markup.Escape(f.Change)}[/]{badge}");
+            if (!string.IsNullOrWhiteSpace(f.Evidence))
+                AnsiConsole.MarkupLine($"[dim]      {Markup.Escape(f.Evidence)}[/]");
         }
         AnsiConsole.WriteLine();
+
+        if (spec.OpenQuestions.Count > 0)
+        {
+            AnsiConsole.MarkupLine("[bold blue]── Open Questions ───────────────────────────────[/]");
+            foreach (var q in spec.OpenQuestions)
+                AnsiConsole.MarkupLine($"[yellow]  ? {Markup.Escape(q)}[/]");
+            AnsiConsole.WriteLine();
+        }
+
+        if (spec.Conventions.Count > 0)
+        {
+            AnsiConsole.MarkupLine("[bold blue]── Conventions ──────────────────────────────────[/]");
+            foreach (var c in spec.Conventions)
+                AnsiConsole.MarkupLine($"[white]  • {Markup.Escape(c)}[/]");
+            AnsiConsole.WriteLine();
+        }
     }
 
     public void RenderVerboseDetail(EnrichedTicket enriched)
@@ -127,11 +148,29 @@ public sealed class OutputRenderer : IOutputRenderer
         sb.AppendLine();
         foreach (var f in spec.FilesToChange)
         {
-            var colonIdx = f.IndexOf(':');
-            var line = colonIdx > 0
-                ? $"- **{f[..colonIdx]}**:{f[(colonIdx + 1)..]}"
-                : $"- {f}";
-            sb.AppendLine(line);
+            sb.AppendLine($"- **{f.File}**: {f.Change}");
+            if (!string.IsNullOrWhiteSpace(f.Confidence))
+                sb.AppendLine($"  - Confidence: {f.Confidence}");
+            if (!string.IsNullOrWhiteSpace(f.Evidence))
+                sb.AppendLine($"  - Evidence: {f.Evidence}");
+        }
+
+        if (spec.OpenQuestions.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Open Questions");
+            sb.AppendLine();
+            foreach (var q in spec.OpenQuestions)
+                sb.AppendLine($"- {q}");
+        }
+
+        if (spec.Conventions.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## Conventions");
+            sb.AppendLine();
+            foreach (var c in spec.Conventions)
+                sb.AppendLine($"- {c}");
         }
 
         var path = outputPath.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
@@ -218,11 +257,29 @@ public sealed class OutputRenderer : IOutputRenderer
             sb.AppendLine();
             foreach (var f in spec.FilesToChange)
             {
-                var colonIdx = f.IndexOf(':');
-                var line = colonIdx > 0
-                    ? $"- **{f[..colonIdx]}**:{f[(colonIdx + 1)..]}"
-                    : $"- {f}";
-                sb.AppendLine(line);
+                sb.AppendLine($"- **{f.File}**: {f.Change}");
+                if (!string.IsNullOrWhiteSpace(f.Confidence))
+                    sb.AppendLine($"  - Confidence: {f.Confidence}");
+                if (!string.IsNullOrWhiteSpace(f.Evidence))
+                    sb.AppendLine($"  - Evidence: {f.Evidence}");
+            }
+
+            if (spec.OpenQuestions.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Open Questions");
+                sb.AppendLine();
+                foreach (var q in spec.OpenQuestions)
+                    sb.AppendLine($"- {q}");
+            }
+
+            if (spec.Conventions.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("## Conventions");
+                sb.AppendLine();
+                foreach (var c in spec.Conventions)
+                    sb.AppendLine($"- {c}");
             }
 
             File.WriteAllText(filePath, sb.ToString(), noBom);

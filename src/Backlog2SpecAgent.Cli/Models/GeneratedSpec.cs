@@ -17,5 +17,26 @@ public sealed class GeneratedSpec
     public string OutOfScope { get; init; } = string.Empty;
 
     [JsonPropertyName("filesToChange")]
-    public List<string> FilesToChange { get; init; } = [];
+    public List<FileChange> FilesToChange { get; init; } = [];
+
+    [JsonPropertyName("openQuestions")]
+    public List<string> OpenQuestions { get; init; } = [];
+
+    [JsonPropertyName("conventions")]
+    public List<string> Conventions { get; init; } = [];
+}
+
+public sealed class FileChange
+{
+    [JsonPropertyName("file")]
+    public string File { get; init; } = string.Empty;
+
+    [JsonPropertyName("change")]
+    public string Change { get; init; } = string.Empty;
+
+    [JsonPropertyName("evidence")]
+    public string Evidence { get; init; } = string.Empty;
+
+    [JsonPropertyName("confidence")]
+    public string Confidence { get; init; } = string.Empty;
 }

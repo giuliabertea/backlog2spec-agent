@@ -78,6 +78,7 @@ var host = Host.CreateDefaultBuilder(args)
                 var searchApiKey = config["AzureSearch:ApiKey"]
                     ?? throw new InvalidOperationException("AzureSearch:ApiKey secret is missing when AzureAI:UseAgent is true.");
                 var searchIndexName = config["AzureSearch:IndexName"] ?? "codebase-chunks";
+                var useClientSideRetrieval = config.GetValue<bool>("AzureSearch:UseClientSideRetrieval");
 
                 services.AddSingleton<IAssistantClient>(sp =>
                     new AssistantClient(projectEndpoint, apiKey, assistantId,
@@ -88,6 +89,7 @@ var host = Host.CreateDefaultBuilder(args)
                         sp.GetRequiredService<ConfigLoader>(),
                         toolsBaseUrl, toolsApiKey,
                         searchEndpoint, searchApiKey, searchIndexName,
+                        useClientSideRetrieval,
                         sp.GetRequiredService<ILogger<AssistantSpecGeneratorAgent>>()));
                 services.AddSingleton<IHierarchyFetcher>(
                     _ => new ToolsApiHierarchyFetcher(toolsBaseUrl, toolsApiKey));

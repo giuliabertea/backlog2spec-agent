@@ -18,9 +18,23 @@ public sealed class MockSpecGeneratorAgent : ISpecGeneratorAgent
             OutOfScope = "Authentication, Authorization",
             FilesToChange =
             [
-                "src/Backlog2SpecAgent.Cli/Agents/MockSpecGeneratorAgent.cs: return mock GeneratedSpec",
-                "src/Backlog2SpecAgent.Cli/Agents/ISpecGeneratorAgent.cs: interface contract"
-            ]
+                new FileChange
+                {
+                    File       = "src/Backlog2SpecAgent.Cli/Agents/MockSpecGeneratorAgent.cs",
+                    Change     = "return mock GeneratedSpec",
+                    Evidence   = "readFile src/Backlog2SpecAgent.Cli/Agents/MockSpecGeneratorAgent.cs:1-26 shows the fixed mock implementation",
+                    Confidence = "high"
+                },
+                new FileChange
+                {
+                    File       = "src/Backlog2SpecAgent.Cli/Agents/ISpecGeneratorAgent.cs",
+                    Change     = "interface contract",
+                    Evidence   = "readFile src/Backlog2SpecAgent.Cli/Agents/ISpecGeneratorAgent.cs shows the GenerateAsync signature",
+                    Confidence = "high"
+                }
+            ],
+            OpenQuestions = [],
+            Conventions   = []
         });
     }
 }

@@ -2,7 +2,7 @@
 
 A CLI tool that turns an Azure DevOps work item into a structured, ready-to-use spec — in seconds.
 
-Given a work item ID (PBI, tus, bug, feature, epic), it fetches the ticket from ADO, enriches it with AI (filling context, edge cases, ambiguities), optionally retrieves relevant source files from your indexed codebase for grounding, then generates a structured spec tailored to your project's stack and conventions.
+Given a work item ID (PBI, bug, feature, epic), it fetches the ticket from ADO, enriches it with AI, then hands off to an Azure AI Foundry agent that **autonomously investigates the codebase** (listing directories, reading files, finding references, inspecting outlines) before generating a grounded spec. Every file in the output carries an `evidence` string (what the agent actually read) and a `confidence` badge — so the spec is traceable, not guessed.
 
 ---
 
@@ -49,10 +49,18 @@ The lockout state is persisted per user and resets on successful login.
 SSO, session timeout, password reset
 
 ── Files to Change ──────────────────────────────
-  • src/Services/AuthService.cs: add EnforceLockout() and ResetAttempts()
-  • src/Repositories/UserRepository.cs: add UpdateFailedAttempts()
-  • src/Controllers/LoginController.cs: return 423 on locked account
+  • src/Services/AuthService.cs: add EnforceLockout() and ResetAttempts() ●
+      readFile src/Services/AuthService.cs:12-45 shows HandleLogin calls no lockout check
+  • src/Repositories/UserRepository.cs: add UpdateFailedAttempts() ●
+      findReferences FailedAttempts shows no existing counter field
+  • src/Controllers/LoginController.cs: return 423 on locked account ○
+      readFile src/Controllers/LoginController.cs:20-60 shows return 401 pattern to adapt
 ```
+
+Each entry in **Files to Change** carries:
+- **file** and **change** — the path and what to do (same as before)
+- **confidence badge** — `●` green = high, `●` yellow = medium, `●` red = low — how certain the agent is that this file needs changing
+- **evidence** (dimmed) — what the agent actually read that justifies the entry; non-empty for every entry
 
 ---
 ## Architecture Overview
@@ -148,7 +156,70 @@ Rules:
 - Be complete: cover all edge cases implied by the ticket
 ```
 
-5. Save. No tool definitions are needed in the portal.
+5. Save. No tool definitions are needed at this step — see **Step B** below to register the Tools API as an OpenAPI tool.
+
+### Step B: Register the Tools API as an OpenAPI tool in Foundry
+
+After deploying the Tools API to App Service:
+
+1. Go to [ai.azure.com](https://ai.azure.com) → **Agents** → select `backlog2spec-agent`.
+2. Under **Tools**, click **Add tool → OpenAPI**.
+3. Import URL: `https://<your-tools-api>.azurewebsites.net/swagger/v1/swagger.json`
+4. Foundry will auto-detect all eight operations (`getWorkItem`, `getWorkItemHierarchy`, `searchCode`, `saveSpec`, `listDirectory`, `readFile`, `findReferences`, `getFileOutline`).
+5. Under **Authentication**, set type to **API Key** and enter your `AzureAI:ToolsApiKey` value as the `X-Api-Key` header value.
+6. Save the agent.
+
+> The swagger document is served publicly (the X-Api-Key middleware skips `/swagger/*` paths). Only the API endpoints themselves require the key.
+
+### Step C: Replace the agent system prompt
+
+Replace the system prompt set in Step A with the following investigation protocol:
+
+```
+You are a senior software engineer generating production-ready structured specs
+from Azure DevOps work items.
+
+You receive a JSON object with:
+  workItem:      the ADO ticket data (id, title, description, acceptanceCriteria)
+  projectConfig: stack information
+  devRules:      (optional) team-specific architectural rules
+
+You have access to repository navigation tools. Before producing any output,
+follow this five-step investigation protocol (use at most 12 tool calls total):
+
+1. UNDERSTAND  — read the work item carefully; identify the domain entities and
+                 keywords likely to appear in source file paths and class names.
+2. HYPOTHESISE — list 3–5 candidate files/components that are likely to change.
+3. INVESTIGATE — use listDirectory, readFile, findReferences, and getFileOutline
+                 to verify your hypotheses. For each candidate: get the outline,
+                 then read the relevant sections. Follow caller chains when needed.
+4. IMPACT      — determine which callers, tests, and interfaces are affected.
+5. PLAN        — only now write the final spec JSON.
+
+Output ONLY a valid JSON object (no markdown, no prose) matching this schema:
+{
+  "goal": "string",
+  "behaviour": ["string"],
+  "edgeCases": ["string"],
+  "outOfScope": ["string"],
+  "filesToChange": [
+    {
+      "file": "string",
+      "change": "string",
+      "evidence": "string — what you actually read that confirms this file needs changing",
+      "confidence": "high | medium | low"
+    }
+  ],
+  "openQuestions": ["string — ambiguities or unverified locations"],
+  "conventions": ["string — patterns observed in the codebase that should be followed"]
+}
+
+Rules:
+- No file may appear in filesToChange without a non-empty evidence string.
+- Uncertain locations go to openQuestions, not to filesToChange.
+- Follow Clean Architecture principles and any devRules provided.
+- confidence "low" is valid — it signals the developer to double-check.
+```
 
 ### Index your codebase for RAG (run once, repeat after major changes)
 
@@ -213,13 +284,16 @@ dotnet user-secrets set "Ado:Pat"                 "your-ado-pat"
 Agent mode adds these secrets (`AzureAI:UseAgent = true`):
 
 ```bash
-dotnet user-secrets set "AzureAI:UseAgent"        "true"
-dotnet user-secrets set "AzureAI:ProjectEndpoint" "https://<resource>.openai.azure.com/openai"
-dotnet user-secrets set "AzureAI:ToolsApiKey"     "your-tools-api-key"
-dotnet user-secrets set "AzureSearch:Endpoint"    "https://<name>.search.windows.net"
-dotnet user-secrets set "AzureSearch:ApiKey"      "your-search-admin-key"
-dotnet user-secrets set "AzureSearch:IndexName"   "codebase-chunks"
+dotnet user-secrets set "AzureAI:UseAgent"                    "true"
+dotnet user-secrets set "AzureAI:ProjectEndpoint"             "https://<resource>.openai.azure.com/openai"
+dotnet user-secrets set "AzureAI:ToolsApiKey"                 "your-tools-api-key"
+dotnet user-secrets set "AzureSearch:Endpoint"                "https://<name>.search.windows.net"
+dotnet user-secrets set "AzureSearch:ApiKey"                  "your-search-admin-key"
+dotnet user-secrets set "AzureSearch:IndexName"               "codebase-chunks"
+dotnet user-secrets set "AzureSearch:UseClientSideRetrieval"  "false"
 ```
+
+`AzureSearch:UseClientSideRetrieval` defaults to `false` — the agent fetches repo context autonomously via the Tools API navigation tools. Set to `true` to fall back to the legacy C#-side Azure AI Search pre-fetch (useful for debugging or cost control on simple tickets).
 
 > `toolsApi.baseUrl` is read from `backlog-2-spec.json`, not from secrets — set it in the config file.
 

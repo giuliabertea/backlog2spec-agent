@@ -17,9 +17,21 @@ public sealed class MockAssistantClient : IAssistantClient
               ],
               "outOfScope": ["Authentication", "Logging", "Notifications"],
               "filesToChange": [
-                { "file": "src/Services/ExampleService.cs", "change": "Add the new method" },
-                { "file": "src/Controllers/ExampleController.cs", "change": "Wire up the new endpoint" }
-              ]
+                {
+                  "file": "src/Services/ExampleService.cs",
+                  "change": "Add the new method",
+                  "evidence": "readFile src/Services/ExampleService.cs:1-40 shows the service class where the new method should be added",
+                  "confidence": "high"
+                },
+                {
+                  "file": "src/Controllers/ExampleController.cs",
+                  "change": "Wire up the new endpoint",
+                  "evidence": "readFile src/Controllers/ExampleController.cs:15-30 shows the existing endpoint pattern to follow",
+                  "confidence": "medium"
+                }
+              ],
+              "openQuestions": [],
+              "conventions": []
             }
             """);
 }

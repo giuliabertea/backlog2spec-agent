@@ -41,6 +41,22 @@ public class SpecGeneratorAgentTests
     }
 
     [Fact]
+    public async Task MockSpecGeneratorAgent_FilesToChange_HaveNonEmptyEvidence()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        var spec = await agent.GenerateAsync(1);
+        Assert.All(spec.FilesToChange, f => Assert.False(string.IsNullOrWhiteSpace(f.Evidence)));
+    }
+
+    [Fact]
+    public async Task MockSpecGeneratorAgent_FilesToChange_HaveConfidence()
+    {
+        var agent = new MockSpecGeneratorAgent();
+        var spec = await agent.GenerateAsync(1);
+        Assert.All(spec.FilesToChange, f => Assert.False(string.IsNullOrWhiteSpace(f.Confidence)));
+    }
+
+    [Fact]
     public async Task MockSpecGeneratorAgent_IsDeterministic()
     {
         var agent = new MockSpecGeneratorAgent();
@@ -70,9 +86,24 @@ public class SpecGeneratorAgentTests
         var client = new MockAssistantClient();
         var raw = await client.RunAsync("any input");
         Assert.False(string.IsNullOrWhiteSpace(raw));
-        // Must be parseable as a GeneratedSpec-shaped JSON object
         using var doc = System.Text.Json.JsonDocument.Parse(raw);
         Assert.True(doc.RootElement.TryGetProperty("goal", out _));
+    }
+
+    [Fact]
+    public async Task MockAssistantClient_FilesToChange_HaveEvidenceAndConfidence()
+    {
+        var client = new MockAssistantClient();
+        var raw = await client.RunAsync("any input");
+        using var doc = System.Text.Json.JsonDocument.Parse(raw);
+        Assert.True(doc.RootElement.TryGetProperty("filesToChange", out var files));
+        foreach (var file in files.EnumerateArray())
+        {
+            Assert.True(file.TryGetProperty("evidence", out var ev));
+            Assert.False(string.IsNullOrWhiteSpace(ev.GetString()));
+            Assert.True(file.TryGetProperty("confidence", out var conf));
+            Assert.False(string.IsNullOrWhiteSpace(conf.GetString()));
+        }
     }
 
     [Fact]

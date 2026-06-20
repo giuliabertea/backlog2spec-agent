@@ -28,6 +28,7 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
     private readonly HttpClient _searchHttp;
     private readonly string _searchEndpoint;
     private readonly string _searchIndexName;
+    private readonly bool _useClientSideRetrieval;
     private readonly ILogger<AssistantSpecGeneratorAgent> _logger;
 
     public AssistantSpecGeneratorAgent(
@@ -38,6 +39,7 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
         string searchEndpoint,
         string searchApiKey,
         string searchIndexName,
+        bool useClientSideRetrieval,
         ILogger<AssistantSpecGeneratorAgent> logger)
     {
         _assistantClient = assistantClient;
@@ -49,6 +51,7 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
         _searchIndexName = searchIndexName;
         _searchHttp = new HttpClient();
         _searchHttp.DefaultRequestHeaders.Add("api-key", searchApiKey);
+        _useClientSideRetrieval = useClientSideRetrieval;
         _logger = logger;
     }
 
@@ -59,9 +62,13 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
         // a. Fetch work item from Tools API
         var workItemJson = await FetchWorkItemAsync(workItemId, ct);
 
-        // b. Extract title and query Azure AI Search for relevant code snippets
-        var title = ExtractTitle(workItemJson);
-        var repoContext = await QueryAzureSearchAsync(title, ct);
+        // b. Optionally fetch repo context via Azure AI Search (client-side retrieval fallback)
+        List<RepoContextItem> repoContext = [];
+        if (_useClientSideRetrieval)
+        {
+            var title = ExtractTitle(workItemJson);
+            repoContext = await QueryAzureSearchAsync(title, ct);
+        }
 
         // c. Load project config (graceful fallback to defaults if no config file found)
         BacklogConfig config = await _configLoader.LoadAsync(ct);
@@ -174,14 +181,15 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
         using var doc = JsonDocument.Parse(workItemJson);
         var workItem = doc.RootElement.Clone();
 
-        var mapped = repoContext.Select(r => new { file = r.File, content = r.Content }).ToArray();
         var projectConfig = new
         {
-            stack = BuildStack(config),
+            stack        = BuildStack(config),
             architecture = config.Project.Architecture,
-            description = config.Project.Description,
-            conventions = BuildConventions(config)
+            description  = config.Project.Description,
+            conventions  = BuildConventions(config)
         };
+
+        var mapped = repoContext.Select(r => new { file = r.File, content = r.Content }).ToArray();
         var repoContextValue = mapped.Length > 0 ? (object?)mapped : null;
 
         if (!string.IsNullOrWhiteSpace(config.DevRulesContent))
@@ -190,7 +198,7 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
             {
                 workItem,
                 projectConfig,
-                devRules = config.DevRulesContent,
+                devRules    = config.DevRulesContent,
                 repoContext = repoContextValue
             }, JsonOptions);
         }
@@ -230,13 +238,21 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
     private static GeneratedSpec MapToGeneratedSpec(AssistantSpec spec) =>
         new()
         {
-            Goal = spec.Goal,
-            Behaviour = spec.Behaviour,
-            EdgeCases = spec.EdgeCases,
-            OutOfScope = string.Join(", ", spec.OutOfScope),
+            Goal          = spec.Goal,
+            Behaviour     = spec.Behaviour,
+            EdgeCases     = spec.EdgeCases,
+            OutOfScope    = string.Join(", ", spec.OutOfScope),
             FilesToChange = spec.FilesToChange
-                .Select(f => $"{f.File}: {f.Change}")
-                .ToList()
+                .Select(f => new FileChange
+                {
+                    File       = f.File,
+                    Change     = f.Change,
+                    Evidence   = f.Evidence,
+                    Confidence = f.Confidence
+                })
+                .ToList(),
+            OpenQuestions = spec.OpenQuestions,
+            Conventions   = spec.Conventions
         };
 
     private static string ExtractJson(string raw)
@@ -248,7 +264,7 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
 
     private sealed record RepoContextItem(string File, string Content);
 
-    // Matches the schema the Azure OpenAI Assistant is configured to return (see README for portal setup).
+    // Matches the schema the Foundry agent is configured to return (see README for portal setup).
     private sealed class AssistantSpec
     {
         [JsonPropertyName("goal")]
@@ -265,6 +281,12 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
 
         [JsonPropertyName("filesToChange")]
         public List<AssistantFileChange> FilesToChange { get; init; } = [];
+
+        [JsonPropertyName("openQuestions")]
+        public List<string> OpenQuestions { get; init; } = [];
+
+        [JsonPropertyName("conventions")]
+        public List<string> Conventions { get; init; } = [];
     }
 
     private sealed class AssistantFileChange
@@ -274,5 +296,11 @@ public sealed class AssistantSpecGeneratorAgent : ISpecGeneratorAgent
 
         [JsonPropertyName("change")]
         public string Change { get; init; } = string.Empty;
+
+        [JsonPropertyName("evidence")]
+        public string Evidence { get; init; } = string.Empty;
+
+        [JsonPropertyName("confidence")]
+        public string Confidence { get; init; } = string.Empty;
     }
 }

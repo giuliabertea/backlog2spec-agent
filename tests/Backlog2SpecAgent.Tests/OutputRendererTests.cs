@@ -135,6 +135,21 @@ public class OutputRendererTests : IDisposable
         Assert.Contains("Improve booking accuracy", content);
     }
 
+    [Fact]
+    public void WriteHierarchyToFiles_ChildFileContainsFileAndEvidence()
+    {
+        var renderer = new OutputRenderer();
+        var parent = new WorkItemDto { Id = 10, Title = "Feature", WorkItemType = "Feature" };
+        var spec = Spec("Goal");
+        var children = new[] { (Item(11, "Child"), spec) };
+
+        renderer.WriteHierarchyToFiles(parent, children, _tempDir);
+
+        var content = File.ReadAllText(Path.Combine(_tempDir, "11-child.md"));
+        Assert.Contains("src/Foo.cs", content);
+        Assert.Contains("read src/Foo.cs", content);
+    }
+
     // --- RenderMarkdown ---
 
     [Fact]
@@ -166,6 +181,29 @@ public class OutputRendererTests : IDisposable
         Assert.True(File.Exists(pathWithoutExt + ".md"));
     }
 
+    [Fact]
+    public void RenderMarkdown_IncludesConfidenceAndEvidence()
+    {
+        var renderer = new OutputRenderer();
+        var path = Path.Combine(_tempDir, "spec.md");
+        renderer.RenderMarkdown(Spec("Goal"), "Title", 1, path);
+        var content = File.ReadAllText(path);
+        Assert.Contains("high", content);
+        Assert.Contains("read src/Foo.cs", content);
+    }
+
+    [Fact]
+    public void RenderMarkdown_IncludesOpenQuestionsSection()
+    {
+        var renderer = new OutputRenderer();
+        var path = Path.Combine(_tempDir, "spec.md");
+        var spec = SpecWithQuestions("Goal", "Is this the right approach?");
+        renderer.RenderMarkdown(spec, "Title", 1, path);
+        var content = File.ReadAllText(path);
+        Assert.Contains("Open Questions", content);
+        Assert.Contains("Is this the right approach?", content);
+    }
+
     private static WorkItemDto Item(int id, string title) =>
         new() { Id = id, Title = title, WorkItemType = "Product Backlog Item" };
 
@@ -175,6 +213,31 @@ public class OutputRendererTests : IDisposable
         Behaviour = ["B1"],
         EdgeCases = ["E1"],
         OutOfScope = "Auth",
-        FilesToChange = ["src/Foo.cs: add method"]
+        FilesToChange =
+        [
+            new FileChange
+            {
+                File       = "src/Foo.cs",
+                Change     = "add method",
+                Evidence   = "read src/Foo.cs lines 1-10",
+                Confidence = "high"
+            }
+        ],
+        OpenQuestions = [],
+        Conventions   = []
+    };
+
+    private static GeneratedSpec SpecWithQuestions(string goal, string question) => new()
+    {
+        Goal = goal,
+        Behaviour = ["B1"],
+        EdgeCases = ["E1"],
+        OutOfScope = "Auth",
+        FilesToChange =
+        [
+            new FileChange { File = "src/Foo.cs", Change = "add method", Evidence = "read src/Foo.cs", Confidence = "high" }
+        ],
+        OpenQuestions = [question],
+        Conventions   = []
     };
 }
