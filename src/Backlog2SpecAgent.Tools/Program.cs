@@ -20,28 +20,29 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Backlog2Spec Tools API v1"));
 
-// ── X-Api-Key middleware ────────────────────────────────────────────────────
-var requiredApiKey = app.Configuration["Security:ApiKey"] ?? string.Empty;
-app.Use(async (ctx, next) =>
-{
-    if (ctx.Request.Path.StartsWithSegments("/swagger"))
-    {
-        await next(ctx);
-        return;
-    }
-
-    if (!string.IsNullOrEmpty(requiredApiKey))
-    {
-        if (!ctx.Request.Headers.TryGetValue("X-Api-Key", out var provided) ||
-            !string.Equals(provided, requiredApiKey, StringComparison.Ordinal))
-        {
-            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await ctx.Response.WriteAsync("Unauthorized");
-            return;
-        }
-    }
-    await next(ctx);
-});
+// TODO: re-enable auth with Managed Identity
+// ── X-Api-Key middleware (disabled) ────────────────────────────────────────
+// var requiredApiKey = app.Configuration["Security:ApiKey"] ?? string.Empty;
+// app.Use(async (ctx, next) =>
+// {
+//     if (ctx.Request.Path.StartsWithSegments("/swagger"))
+//     {
+//         await next(ctx);
+//         return;
+//     }
+//
+//     if (!string.IsNullOrEmpty(requiredApiKey))
+//     {
+//         if (!ctx.Request.Headers.TryGetValue("X-Api-Key", out var provided) ||
+//             !string.Equals(provided, requiredApiKey, StringComparison.Ordinal))
+//         {
+//             ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+//             await ctx.Response.WriteAsync("Unauthorized");
+//             return;
+//         }
+//     }
+//     await next(ctx);
+// });
 
 // ── GET /workitem/{id} ──────────────────────────────────────────────────────
 app.MapGet("/workitem/{id:int}", async (int id, IConfiguration config, IHttpClientFactory factory) =>
