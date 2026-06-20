@@ -8,12 +8,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
+{
     c.SwaggerDoc("v1", new OpenApiInfo
     {
         Title = "Backlog2Spec Tools API",
         Version = "v1",
         Description = "Repository navigation and work item tools for the Backlog2SpecAgent Foundry agent."
-    }));
+    });
+    var baseUrl = builder.Configuration["Tools:BaseUrl"];
+    if (!string.IsNullOrEmpty(baseUrl))
+        c.AddServer(new OpenApiServer { Url = baseUrl });
+});
 
 var app = builder.Build();
 
