@@ -65,7 +65,7 @@ Each entry in **Files to Change** carries:
 ---
 ## Architecture Overview
 
-![Architecture Diagram](architecture.svg)
+![Architecture Diagram](backlog2spec_architecture.svg)
 
 ---
 

@@ -1,0 +1,240 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" width="900">
+
+  <!-- Background -->
+  <rect width="900" height="500" fill="#FFFFFF"/>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="ah-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#0F766E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- ══════════════════════════════════════════════════════
+       ZONE BACKGROUNDS
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Zone 1: Developer Machine -->
+  <rect x="8" y="8" width="196" height="484" rx="10"
+        fill="#F9FAFB" stroke="#D1D5DB" stroke-width="1"/>
+  <text x="106" y="27" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="9"
+        fill="#9CA3AF" font-weight="bold" letter-spacing="1.5">DEVELOPER MACHINE</text>
+
+  <!-- Zone 2: Azure AI Foundry -->
+  <rect x="212" y="8" width="278" height="484" rx="10"
+        fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1"/>
+  <text x="351" y="27" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="9"
+        fill="#3B82F6" font-weight="bold" letter-spacing="1.5">AZURE AI FOUNDRY</text>
+
+  <!-- Zone 3: Azure Cloud -->
+  <rect x="498" y="8" width="394" height="484" rx="10"
+        fill="#F0FDFA" stroke="#99F6E4" stroke-width="1"/>
+  <text x="695" y="27" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="9"
+        fill="#0D9488" font-weight="bold" letter-spacing="1.5">AZURE CLOUD</text>
+
+  <!-- ══════════════════════════════════════════════════════
+       ZONE 1 — DEVELOPER MACHINE
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Developer CLI -->
+  <rect x="28" y="40" width="152" height="52" rx="7"
+        fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1"/>
+  <text x="104" y="62" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="13"
+        font-weight="bold" fill="#374151">Developer CLI</text>
+  <text x="104" y="80" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#6B7280">dotnet backlog-2-spec spec</text>
+
+  <!-- Arrow CLI → FoundrySpecGeneratorAgent -->
+  <line x1="104" y1="92" x2="104" y2="134"
+        stroke="#9CA3AF" stroke-width="1.5" marker-end="url(#ah)"/>
+  <text x="113" y="104" font-family="Arial,Helvetica,sans-serif" font-size="9" fill="#9CA3AF">workItem</text>
+  <text x="113" y="116" font-family="Arial,Helvetica,sans-serif" font-size="9" fill="#9CA3AF">projectConfig</text>
+  <text x="113" y="128" font-family="Arial,Helvetica,sans-serif" font-size="9" fill="#9CA3AF">devRules</text>
+
+  <!-- FoundrySpecGeneratorAgent.cs -->
+  <rect x="18" y="134" width="172" height="54" rx="7"
+        fill="#EDE9FE" stroke="#7C3AED" stroke-width="1"/>
+  <text x="104" y="156" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="12"
+        font-weight="bold" fill="#4C1D95">FoundrySpecGenerator</text>
+  <text x="104" y="175" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="11"
+        fill="#6D28D9">Agent.cs</text>
+
+  <!-- Arrow FoundrySpecGenerator → Spec Output -->
+  <line x1="104" y1="188" x2="104" y2="396"
+        stroke="#9CA3AF" stroke-width="1.5" marker-end="url(#ah)"/>
+
+  <!-- Spec Output -->
+  <rect x="18" y="396" width="172" height="72" rx="7"
+        fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1"/>
+  <text x="104" y="420" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="13"
+        font-weight="bold" fill="#374151">Spec output</text>
+  <text x="104" y="439" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#6B7280">evidence · confidence</text>
+  <text x="104" y="455" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#6B7280">openQuestions · conventions</text>
+
+  <!-- ══════════════════════════════════════════════════════
+       ZONE 2 — AZURE AI FOUNDRY
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Arrow FoundrySpecGenerator → Foundry Agent (L-shape) -->
+  <path d="M190,161 H209 V141 H232"
+        fill="none" stroke="#9CA3AF" stroke-width="1.5"
+        marker-end="url(#ah)"/>
+  <text x="217" y="136" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#9CA3AF">RunAsync</text>
+
+  <!-- Foundry Agent -->
+  <rect x="232" y="115" width="178" height="52" rx="7"
+        fill="#DBEAFE" stroke="#2563EB" stroke-width="1"/>
+  <text x="321" y="137" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="13"
+        font-weight="bold" fill="#1E40AF">Foundry Agent</text>
+  <text x="321" y="155" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#2563EB">GPT-4o · investigation loop</text>
+
+  <!-- Arrow Foundry Agent → OpenAPI tool -->
+  <line x1="321" y1="167" x2="321" y2="228"
+        stroke="#9CA3AF" stroke-width="1.5" marker-end="url(#ah)"/>
+  <text x="330" y="201" font-family="Arial,Helvetica,sans-serif"
+        font-size="10" fill="#6B7280">tool calls</text>
+  <text x="330" y="214" font-family="Arial,Helvetica,sans-serif"
+        font-size="10" fill="#6B7280">(max 12)</text>
+
+  <!-- OpenAPI tool -->
+  <rect x="232" y="228" width="178" height="52" rx="7"
+        fill="#DBEAFE" stroke="#2563EB" stroke-width="1"/>
+  <text x="321" y="250" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="13"
+        font-weight="bold" fill="#1E40AF">OpenAPI tool</text>
+  <text x="321" y="268" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#2563EB">8 operations registered</text>
+
+  <!-- Arrow OpenAPI tool → Tools API (L-shape, goes right-up-right) -->
+  <path d="M410,254 H463 V135 H510"
+        fill="none" stroke="#9CA3AF" stroke-width="1.5"
+        marker-end="url(#ah)"/>
+  <text x="466" y="128" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#9CA3AF">HTTPS</text>
+
+  <!-- ══════════════════════════════════════════════════════
+       ZONE 3 — AZURE CLOUD: TOOLS API (large box with operations)
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Tools API main box -->
+  <rect x="510" y="110" width="374" height="220" rx="7"
+        fill="#CCFBF1" stroke="#0F766E" stroke-width="1.5"/>
+
+  <!-- Tools API title area -->
+  <text x="620" y="133" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="14"
+        font-weight="bold" fill="#134E4A">Tools API</text>
+  <text x="620" y="150" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#0F766E">App Service · .NET 8</text>
+
+  <!-- Divider line -->
+  <line x1="522" y1="160" x2="872" y2="160"
+        stroke="#0F766E" stroke-width="0.5" stroke-opacity="0.5"/>
+
+  <!-- Operations label -->
+  <text x="527" y="174" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#0F766E" font-weight="bold"
+        letter-spacing="0.8">OPERATIONS</text>
+
+  <!-- Left column of endpoints (work item + spec) -->
+  <text x="527" y="191" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">GET  /workitem/{id}</text>
+  <text x="527" y="208" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">GET  /workitem/{id}/hierarchy</text>
+  <text x="527" y="225" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">POST /repo-context</text>
+  <text x="527" y="242" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">POST /spec</text>
+
+  <!-- Right column of endpoints (repo navigation) -->
+  <text x="703" y="191" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">GET  /repo/tree</text>
+  <text x="703" y="208" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">GET  /repo/file</text>
+  <text x="703" y="225" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">POST /repo/references</text>
+  <text x="703" y="242" font-family="Courier New,Courier,monospace"
+        font-size="10.5" fill="#134E4A">GET  /repo/outline</text>
+
+  <!-- Section labels -->
+  <text x="527" y="260" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#0F766E">work items + spec</text>
+  <text x="703" y="260" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#0F766E">repo navigation (ADO Git API)</text>
+
+  <!-- Dashed divider before service connections -->
+  <line x1="522" y1="270" x2="872" y2="270"
+        stroke="#0F766E" stroke-width="0.5" stroke-dasharray="4 3" stroke-opacity="0.5"/>
+
+  <!-- "Calls via" label -->
+  <text x="527" y="285" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#0F766E">reads from →</text>
+  <text x="703" y="285" font-family="Arial,Helvetica,sans-serif"
+        font-size="9" fill="#0F766E">indexes via →</text>
+
+  <!-- Arrows from Tools API bottom to services -->
+  <!-- To ADO Git Repo -->
+  <line x1="597" y1="330" x2="597" y2="348"
+        stroke="#0F766E" stroke-width="1.5" stroke-dasharray="4 3"
+        marker-end="url(#ah-teal)"/>
+  <!-- To Azure AI Search -->
+  <line x1="795" y1="330" x2="795" y2="348"
+        stroke="#0F766E" stroke-width="1.5" stroke-dasharray="4 3"
+        marker-end="url(#ah-teal)"/>
+
+  <!-- ADO Git Repo -->
+  <rect x="516" y="348" width="162" height="52" rx="7"
+        fill="#DBEAFE" stroke="#1D4ED8" stroke-width="1"/>
+  <text x="597" y="370" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="13"
+        font-weight="bold" fill="#1E3A8A">ADO Git Repo</text>
+  <text x="597" y="388" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#1D4ED8">Git Items API</text>
+
+  <!-- Azure AI Search -->
+  <rect x="700" y="348" width="182" height="52" rx="7"
+        fill="#DBEAFE" stroke="#1D4ED8" stroke-width="1"/>
+  <text x="791" y="370" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="13"
+        font-weight="bold" fill="#1E3A8A">Azure AI Search</text>
+  <text x="791" y="388" text-anchor="middle"
+        font-family="Arial,Helvetica,sans-serif" font-size="10"
+        fill="#1D4ED8">codebase-chunks index</text>
+
+  <!-- ══════════════════════════════════════════════════════
+       LEGEND
+       ══════════════════════════════════════════════════════ -->
+  <line x1="28" y1="484" x2="58" y2="484"
+        stroke="#9CA3AF" stroke-width="1.5" marker-end="url(#ah)"/>
+  <text x="65" y="488" font-family="Arial,Helvetica,sans-serif"
+        font-size="10" fill="#6B7280">control / data flow</text>
+
+  <line x1="220" y1="484" x2="250" y2="484"
+        stroke="#0F766E" stroke-width="1.5" stroke-dasharray="4 3"
+        marker-end="url(#ah-teal)"/>
+  <text x="257" y="488" font-family="Arial,Helvetica,sans-serif"
+        font-size="10" fill="#6B7280">HTTP call (Tools API → backend)</text>
+
+</svg>
