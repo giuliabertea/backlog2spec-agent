@@ -1,54 +1,62 @@
-using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 
 namespace Backlog2SpecAgent.Cli.Config;
 
+// Binds BacklogConfig from .NET configuration (user-secrets locally, environment
+// variables / App Service application settings in CI or hosted scenarios).
+// This replaces the old backlog-2-spec.json file loader. There is now a single
+// configuration source, independent of the current working directory.
+// Environment variables use "__" where the key uses ":" e.g. ToolsApi__BaseUrl.
 public sealed class ConfigLoader
 {
-    private const string ConfigFileName = "backlog-2-spec.json";
+    private readonly IConfiguration _configuration;
+    private BacklogConfig? _cached;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    public ConfigLoader(IConfiguration configuration)
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
-    };
-
-    // startDirectory is used in tests; production code relies on the default (cwd).
-    private readonly string _startDirectory;
-
-    public ConfigLoader(string? startDirectory = null)
-    {
-        _startDirectory = startDirectory ?? Directory.GetCurrentDirectory();
+        _configuration = configuration;
     }
 
-    public async Task<BacklogConfig> LoadAsync(CancellationToken ct = default)
-    {
-        var configPath = FindConfigFile();
-        if (configPath is null)
-            return new BacklogConfig();
+    public Task<BacklogConfig> LoadAsync(CancellationToken ct = default)
+        => Task.FromResult(Load());
 
-        BacklogConfig config;
-        try
+    public BacklogConfig Load()
+    {
+        if (_cached is not null)
+            return _cached;
+
+        var config = new BacklogConfig
         {
-            await using var stream = File.OpenRead(configPath);
-            config = await JsonSerializer.DeserializeAsync<BacklogConfig>(stream, JsonOptions, ct)
-                     ?? throw new ConfigException($"'{configPath}' is empty or null.");
-        }
-        catch (JsonException ex)
-        {
-            throw new ConfigException($"Failed to parse '{configPath}': {ex.Message}", ex);
-        }
+            Project       = _configuration.GetSection("Project").Get<ProjectConfig>() ?? new ProjectConfig(),
+            Conventions   = _configuration.GetSection("Conventions").Get<ConventionsConfig>() ?? new ConventionsConfig(),
+            Ado           = _configuration.GetSection("Ado").Get<AdoConfig>() ?? new AdoConfig(),
+            ToolsApi      = _configuration.GetSection("ToolsApi").Get<ToolsApiConfig>() ?? new ToolsApiConfig(),
+            DevRulesFiles = _configuration.GetSection("DevRules:Files").Get<string[]>() ?? []
+        };
 
         ValidateRequiredFields(config);
-        await LoadDevRulesAsync(config, configPath, ct);
+        ResolveDevRules(config);
+
+        _cached = config;
         return config;
     }
 
-    private static async Task LoadDevRulesAsync(BacklogConfig config, string configPath, CancellationToken ct)
+    // Dev rules can be supplied two ways:
+    // 1. Inline via DevRules:Content (preferred).
+    // 2. As file paths via DevRules:Files resolved relative to the current directory.
+    private void ResolveDevRules(BacklogConfig config)
     {
+        var inline = _configuration["DevRules:Content"];
+        if (!string.IsNullOrWhiteSpace(inline))
+        {
+            config.DevRulesContent = inline;
+            return;
+        }
+
         if (config.DevRulesFiles.Count == 0)
             return;
 
-        var configDir = Path.GetDirectoryName(configPath) ?? Directory.GetCurrentDirectory();
+        var baseDir = Directory.GetCurrentDirectory();
         var parts = new List<string>();
 
         foreach (var file in config.DevRulesFiles)
@@ -56,39 +64,24 @@ public sealed class ConfigLoader
             if (string.IsNullOrWhiteSpace(file))
                 continue;
 
-            var rulesPath = Path.GetFullPath(file, configDir);
-
+            var rulesPath = Path.GetFullPath(file, baseDir);
             if (!File.Exists(rulesPath))
-                throw new ConfigException($"devRulesFiles entry not found: '{rulesPath}'");
+                throw new ConfigException($"DevRules:Files entry not found: '{rulesPath}'");
 
-            parts.Add(await File.ReadAllTextAsync(rulesPath, ct));
+            parts.Add(File.ReadAllText(rulesPath));
         }
 
         if (parts.Count > 0)
             config.DevRulesContent = string.Join("\n\n", parts);
     }
 
-    private string? FindConfigFile()
-    {
-        var dir = new DirectoryInfo(_startDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, ConfigFileName);
-            if (File.Exists(candidate))
-                return candidate;
-            dir = dir.Parent;
-        }
-
-        return null;
-    }
-
     private static void ValidateRequiredFields(BacklogConfig config)
     {
         if (string.IsNullOrWhiteSpace(config.Ado.Organization))
-            throw new ConfigException("Missing required field: ado.organization");
+            throw new ConfigException("Missing required configuration: Ado:Organization");
         if (string.IsNullOrWhiteSpace(config.Ado.Project))
-            throw new ConfigException("Missing required field: ado.project");
+            throw new ConfigException("Missing required configuration: Ado:Project");
         if (string.IsNullOrWhiteSpace(config.Project.Name))
-            throw new ConfigException("Missing required field: project.name");
+            throw new ConfigException("Missing required configuration: Project:Name");
     }
 }

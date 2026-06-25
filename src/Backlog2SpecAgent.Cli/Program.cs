@@ -13,24 +13,8 @@ using Microsoft.Extensions.Logging;
 
 bool isMock = args.Contains("--mock");
 
-// Load project config file early — toolsApi.baseUrl is needed before DI setup.
-BacklogConfig fileConfig;
-if (isMock)
-{
-    fileConfig = new BacklogConfig();
-}
-else
-{
-    try
-    {
-        fileConfig = await new ConfigLoader().LoadAsync();
-    }
-    catch (ConfigException ex)
-    {
-        Console.Error.WriteLine($"Configuration error: {ex.Message}");
-        return 1;
-    }
-}
+// All configuration comes from the .NET configuration pipeline (user-secrets
+// locally, environment variables / App Service settings when hosted).
 
 var host = Host.CreateDefaultBuilder(args)
     .ConfigureAppConfiguration((_, cfg) =>
@@ -67,9 +51,9 @@ var host = Host.CreateDefaultBuilder(args)
                 var assistantId = config["AzureAI:AssistantId"]
                     ?? throw new InvalidOperationException("AzureAI:AssistantId secret is missing when AzureAI:UseAgent is true.");
 
-                var toolsBaseUrl = fileConfig.ToolsApi.BaseUrl;
+                var toolsBaseUrl = config["ToolsApi:BaseUrl"];
                 if (string.IsNullOrWhiteSpace(toolsBaseUrl))
-                    throw new InvalidOperationException("toolsApi.baseUrl is missing in backlog-2-spec.json when AzureAI:UseAgent is true.");
+                    throw new InvalidOperationException("ToolsApi:BaseUrl is missing. Set ToolsApi__BaseUrl in user-secrets or environment variables.");
 
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");

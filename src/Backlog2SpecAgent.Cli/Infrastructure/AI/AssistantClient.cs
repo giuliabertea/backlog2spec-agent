@@ -29,7 +29,7 @@ public sealed class AssistantClient : IAssistantClient
         string assistantId,
         ILogger<AssistantClient> logger)
     {
-        _baseUrl = endpoint.TrimEnd('/');
+        _baseUrl = NormalizeEndpoint(endpoint);
         _apiKey = apiKey;
         _assistantId = assistantId;
         _http = new HttpClient();
@@ -37,6 +37,18 @@ public sealed class AssistantClient : IAssistantClient
 
         _logger.LogWarning("AssistantClient initialised — endpoint: {Endpoint}, assistantId: {AssistantId}",
             _baseUrl, _assistantId);
+    }
+
+    // The Azure OpenAI Assistants data plane lives under /openai.
+    // A bare endpoint (e.g. https://<resource>.cognitiveservices.azure.com) resolves
+    // POST /threads and returns 404 "Resource not found".
+    // Appending /openai when missing means either endpoint form works.
+    private static string NormalizeEndpoint(string endpoint)
+    {
+        var trimmed = (endpoint ?? string.Empty).TrimEnd('/');
+        if (!trimmed.EndsWith("/openai", StringComparison.OrdinalIgnoreCase))
+            trimmed += "/openai";
+        return trimmed;
     }
 
     public async Task<string> RunAsync(string userMessage, CancellationToken ct = default)

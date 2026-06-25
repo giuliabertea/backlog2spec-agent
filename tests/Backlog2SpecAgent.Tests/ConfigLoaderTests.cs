@@ -1,126 +1,87 @@
-using System.Text;
 using Backlog2SpecAgent.Cli.Config;
+using Microsoft.Extensions.Configuration;
 
 namespace Backlog2SpecAgent.Tests;
 
-public class ConfigLoaderTests : IDisposable
+public class ConfigLoaderTests
 {
-    private readonly string _tempDir;
-
-    public ConfigLoaderTests()
-    {
-        _tempDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
-        Directory.CreateDirectory(_tempDir);
-    }
-
-    public void Dispose() => Directory.Delete(_tempDir, recursive: true);
+    private static ConfigLoader BuildLoader(Dictionary<string, string?> values) =>
+        new(new ConfigurationBuilder().AddInMemoryCollection(values).Build());
 
     [Fact]
-    public async Task LoadAsync_ValidConfigFile_ReturnsPopulatedAgentConfig()
+    public async Task LoadAsync_ValidConfiguration_ReturnsPopulatedConfig()
     {
-        WriteConfig(_tempDir, """
-            {
-              "project": { "name": "MyApp", "language": "C#", "framework": ".NET 8", "architecture": "Clean" },
-              "conventions": { "naming": "PascalCase" },
-              "ado": { "organization": "https://dev.azure.com/myorg", "project": "MyProject" }
-            }
-            """);
+        var loader = BuildLoader(new()
+        {
+            ["Project:Name"]        = "MyApp",
+            ["Project:Language"]    = "C#",
+            ["Ado:Organization"]    = "https://dev.azure.com/myorg",
+            ["Ado:Project"]         = "MyProject",
+            ["ToolsApi:BaseUrl"]    = "https://tools.example.net"
+        });
 
-        var loader = new ConfigLoader(_tempDir);
         var config = await loader.LoadAsync();
 
         Assert.Equal("MyApp", config.Project.Name);
         Assert.Equal("C#", config.Project.Language);
         Assert.Equal("https://dev.azure.com/myorg", config.Ado.Organization);
         Assert.Equal("MyProject", config.Ado.Project);
-    }
-
-    [Fact]
-    public async Task LoadAsync_NoConfigFile_ReturnsDefaultAgentConfig()
-    {
-        var emptyDir = Path.Combine(_tempDir, "empty");
-        Directory.CreateDirectory(emptyDir);
-
-        var loader = new ConfigLoader(emptyDir);
-        var config = await loader.LoadAsync();
-
-        Assert.NotNull(config);
-        Assert.Empty(config.Project.Name);
-        Assert.Empty(config.Ado.Organization);
+        Assert.Equal("https://tools.example.net", config.ToolsApi.BaseUrl);
     }
 
     [Fact]
     public async Task LoadAsync_MissingAdoOrganization_ThrowsConfigException()
     {
-        WriteConfig(_tempDir, """
-            {
-              "project": { "name": "MyApp" },
-              "ado": { "organization": "", "project": "MyProject" }
-            }
-            """);
+        var loader = BuildLoader(new()
+        {
+            ["Project:Name"]     = "MyApp",
+            ["Ado:Organization"] = "",
+            ["Ado:Project"]      = "MyProject"
+        });
 
-        var loader = new ConfigLoader(_tempDir);
         await Assert.ThrowsAsync<ConfigException>(() => loader.LoadAsync());
     }
 
     [Fact]
     public async Task LoadAsync_MissingProjectName_ThrowsConfigException()
     {
-        WriteConfig(_tempDir, """
-            {
-              "project": { "name": "" },
-              "ado": { "organization": "https://dev.azure.com/myorg", "project": "MyProject" }
-            }
-            """);
+        var loader = BuildLoader(new()
+        {
+            ["Project:Name"]     = "",
+            ["Ado:Organization"] = "https://dev.azure.com/myorg",
+            ["Ado:Project"]      = "MyProject"
+        });
 
-        var loader = new ConfigLoader(_tempDir);
         await Assert.ThrowsAsync<ConfigException>(() => loader.LoadAsync());
     }
 
     [Fact]
-    public async Task LoadAsync_InvalidJson_ThrowsConfigException()
+    public async Task LoadAsync_WithInlineDevRules_UsesContentDirectly()
     {
-        WriteConfig(_tempDir, "{ this is not valid json }}}");
+        var loader = BuildLoader(new()
+        {
+            ["Project:Name"]     = "MyApp",
+            ["Ado:Organization"] = "https://dev.azure.com/myorg",
+            ["Ado:Project"]      = "MyProject",
+            ["DevRules:Content"] = "No AutoMapper.\n\nUse Result<T>."
+        });
 
-        var loader = new ConfigLoader(_tempDir);
-        await Assert.ThrowsAsync<ConfigException>(() => loader.LoadAsync());
-    }
-
-    [Fact]
-    public async Task LoadAsync_WithDevRulesFiles_LoadsAndConcatenatesContent()
-    {
-        File.WriteAllText(Path.Combine(_tempDir, "rules1.md"), "No AutoMapper.", Encoding.UTF8);
-        File.WriteAllText(Path.Combine(_tempDir, "rules2.md"), "Use Result<T>.", Encoding.UTF8);
-
-        WriteConfig(_tempDir, $$"""
-            {
-              "project": { "name": "MyApp" },
-              "ado": { "organization": "https://dev.azure.com/myorg", "project": "MyProject" },
-              "devRulesFiles": ["rules1.md", "rules2.md"]
-            }
-            """);
-
-        var loader = new ConfigLoader(_tempDir);
         var config = await loader.LoadAsync();
 
         Assert.Equal("No AutoMapper.\n\nUse Result<T>.", config.DevRulesContent);
     }
 
     [Fact]
-    public async Task LoadAsync_DevRulesFilesMissing_ThrowsConfigException()
+    public async Task LoadAsync_DevRulesFileMissing_ThrowsConfigException()
     {
-        WriteConfig(_tempDir, """
-            {
-              "project": { "name": "MyApp" },
-              "ado": { "organization": "https://dev.azure.com/myorg", "project": "MyProject" },
-              "devRulesFiles": ["does-not-exist.md"]
-            }
-            """);
+        var loader = BuildLoader(new()
+        {
+            ["Project:Name"]     = "MyApp",
+            ["Ado:Organization"] = "https://dev.azure.com/myorg",
+            ["Ado:Project"]      = "MyProject",
+            ["DevRules:Files:0"] = "does-not-exist.md"
+        });
 
-        var loader = new ConfigLoader(_tempDir);
         await Assert.ThrowsAsync<ConfigException>(() => loader.LoadAsync());
     }
-
-    private static void WriteConfig(string dir, string json) =>
-        File.WriteAllText(Path.Combine(dir, "backlog-2-spec.json"), json, Encoding.UTF8);
 }
