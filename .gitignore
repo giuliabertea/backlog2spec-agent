@@ -2,6 +2,12 @@
 bin/
 obj/
 
+# IDE caches
+*.lscache
+
+# Local project config (holds real values — never commit)
+backlog-2-spec.json
+
 # NuGet packages and local pack output
 *.nupkg
 nupkg/

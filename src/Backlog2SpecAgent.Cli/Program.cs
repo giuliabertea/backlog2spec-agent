@@ -73,12 +73,14 @@ var host = Host.CreateDefaultBuilder(args)
 
                 var toolsApiKey = config["AzureAI:ToolsApiKey"]
                     ?? throw new InvalidOperationException("AzureAI:ToolsApiKey secret is missing when AzureAI:UseAgent is true.");
-                var searchEndpoint = config["AzureSearch:Endpoint"]
-                    ?? throw new InvalidOperationException("AzureSearch:Endpoint secret is missing when AzureAI:UseAgent is true.");
-                var searchApiKey = config["AzureSearch:ApiKey"]
-                    ?? throw new InvalidOperationException("AzureSearch:ApiKey secret is missing when AzureAI:UseAgent is true.");
-                var searchIndexName = config["AzureSearch:IndexName"] ?? "codebase-chunks";
                 var useClientSideRetrieval = config.GetValue<bool>("AzureSearch:UseClientSideRetrieval");
+                var searchEndpoint = useClientSideRetrieval
+                    ? (config["AzureSearch:Endpoint"] ?? throw new InvalidOperationException("AzureSearch:Endpoint is required when AzureSearch:UseClientSideRetrieval is true."))
+                    : (config["AzureSearch:Endpoint"] ?? string.Empty);
+                var searchApiKey = useClientSideRetrieval
+                    ? (config["AzureSearch:ApiKey"] ?? throw new InvalidOperationException("AzureSearch:ApiKey is required when AzureSearch:UseClientSideRetrieval is true."))
+                    : (config["AzureSearch:ApiKey"] ?? string.Empty);
+                var searchIndexName = config["AzureSearch:IndexName"] ?? "codebase-chunks";
 
                 services.AddSingleton<IAssistantClient>(sp =>
                     new AssistantClient(projectEndpoint, apiKey, assistantId,
