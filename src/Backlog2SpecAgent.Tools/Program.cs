@@ -237,12 +237,16 @@ app.MapGet("/repo/tree", async (string? path, IConfiguration config, IHttpClient
     using var http = CreateAdoHttp(factory, pat!);
     var encoded = Uri.EscapeDataString(dirPath);
     var listUrl = $"{org!.TrimEnd('/')}/{project}/_apis/git/repositories/{repo}/items" +
-                  $"?path={encoded}&recursionLevel=oneLevel" +
+                  $"?scopePath={encoded}&recursionLevel=OneLevel" +
                   $"&versionDescriptor.version={Uri.EscapeDataString(branch)}" +
                   $"&versionDescriptor.versionType=branch&api-version=7.1";
 
     var resp = await http.GetAsync(listUrl);
-    if (!resp.IsSuccessStatusCode) return Results.Ok(Array.Empty<object>());
+    if (!resp.IsSuccessStatusCode)
+    {
+        var errorBody = await resp.Content.ReadAsStringAsync();
+        return Results.Problem($"ADO error {(int)resp.StatusCode}: {errorBody}");
+    }
 
     var entries = new List<object>();
     using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
