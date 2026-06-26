@@ -459,8 +459,16 @@ static async Task<string?> FetchFileContentAsync(HttpClient http, string org, st
     var resp = await http.GetAsync(fileUrl);
     if (!resp.IsSuccessStatusCode) return null;
 
-    using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-    return doc.RootElement.TryGetProperty("content", out var c) ? c.GetString() : null;
+    var body = await resp.Content.ReadAsStringAsync();
+    try
+    {
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.TryGetProperty("content", out var c) ? c.GetString() : null;
+    }
+    catch (JsonException)
+    {
+        return null;
+    }
 }
 
 static List<object> ExtractCSharpSymbols(string content)
