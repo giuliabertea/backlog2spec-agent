@@ -450,7 +450,8 @@ static HttpClient CreateAdoHttp(IHttpClientFactory factory, string pat)
 
 static async Task<string?> FetchFileContentAsync(HttpClient http, string org, string project, string repo, string branch, string filePath)
 {
-    var encoded = Uri.EscapeDataString(filePath.TrimStart('/'));
+    var normalizedPath = filePath.StartsWith("/") ? filePath : "/" + filePath;
+    var encoded = Uri.EscapeDataString(normalizedPath);
     var fileUrl = $"{org.TrimEnd('/')}/{project}/_apis/git/repositories/{repo}/items" +
                   $"?path={encoded}&includeContent=true" +
                   $"&versionDescriptor.version={Uri.EscapeDataString(branch)}" +
