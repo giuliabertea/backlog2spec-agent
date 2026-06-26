@@ -160,7 +160,11 @@ app.MapPost("/repo-context", async (RepoContextRequest req, IConfiguration confi
                   $"&versionDescriptor.versionType=branch&api-version=7.1";
 
     var listResp = await http.GetAsync(listUrl);
-    if (!listResp.IsSuccessStatusCode) return Results.Ok(Array.Empty<object>());
+    if (!listResp.IsSuccessStatusCode)
+    {
+        var body = await listResp.Content.ReadAsStringAsync();
+        return Results.Problem($"ADO error {(int)listResp.StatusCode}: {body}");
+    }
 
     var allPaths = new List<string>();
     using (var listDoc = JsonDocument.Parse(await listResp.Content.ReadAsStringAsync()))
@@ -339,7 +343,11 @@ app.MapPost("/repo/references", async (FindReferencesRequest req, IConfiguration
                   $"&versionDescriptor.versionType=branch&api-version=7.1";
 
     var listResp = await http.GetAsync(listUrl);
-    if (!listResp.IsSuccessStatusCode) return Results.Ok(Array.Empty<object>());
+    if (!listResp.IsSuccessStatusCode)
+    {
+        var body = await listResp.Content.ReadAsStringAsync();
+        return Results.Problem($"ADO error {(int)listResp.StatusCode}: {body}");
+    }
 
     var sourceExts = new HashSet<string> { ".cs", ".ts", ".js", ".py", ".java", ".go" };
     var sourcePaths = new List<string>();
@@ -442,7 +450,7 @@ static HttpClient CreateAdoHttp(IHttpClientFactory factory, string pat)
 
 static async Task<string?> FetchFileContentAsync(HttpClient http, string org, string project, string repo, string branch, string filePath)
 {
-    var encoded = Uri.EscapeDataString(filePath);
+    var encoded = Uri.EscapeDataString(filePath.TrimStart('/'));
     var fileUrl = $"{org.TrimEnd('/')}/{project}/_apis/git/repositories/{repo}/items" +
                   $"?path={encoded}&includeContent=true" +
                   $"&versionDescriptor.version={Uri.EscapeDataString(branch)}" +
