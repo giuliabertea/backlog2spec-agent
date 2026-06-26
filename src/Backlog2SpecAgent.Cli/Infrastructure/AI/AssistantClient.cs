@@ -11,7 +11,7 @@ namespace Backlog2SpecAgent.Cli.Infrastructure.AI;
 // API version: 2024-05-01-preview
 public sealed class AssistantClient : IAssistantClient
 {
-    private const string ApiVersion = "2025-01-01-preview";
+    private const string ApiVersion = "2024-05-01-preview";
     private const int MaxRateLimitRetries = 3;
     private const int RateLimitRetryFallbackSeconds = 60;
     private const int MaxPollCount = 150; // 5 minutes at 2s per poll
@@ -46,10 +46,7 @@ public sealed class AssistantClient : IAssistantClient
     private static string NormalizeEndpoint(string endpoint)
     {
         var trimmed = (endpoint ?? string.Empty).TrimEnd('/');
-        // Foundry project endpoints already have the correct path
-        // Only append /openai for classic resource endpoints
-        if (!trimmed.EndsWith("/openai", StringComparison.OrdinalIgnoreCase) 
-            && !trimmed.Contains("/api/projects/"))
+        if (!trimmed.EndsWith("/openai", StringComparison.OrdinalIgnoreCase))
             trimmed += "/openai";
         return trimmed;
     }
