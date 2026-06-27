@@ -461,14 +461,20 @@ static async Task<string?> FetchFileContentAsync(HttpClient http, string org, st
     if (!resp.IsSuccessStatusCode) return null;
 
     var body = await resp.Content.ReadAsStringAsync();
+    Console.WriteLine($"ADO Content-Type: {resp.Content.Headers.ContentType}");
+    Console.WriteLine($"ADO Body start: {body[..Math.Min(100, body.Length)]}");
     try
     {
         using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.TryGetProperty("content", out var c) ? c.GetString() : null;
+    
+        if (doc.RootElement.TryGetProperty("content", out var c))
+            return c.GetString();
+    
+        return body;
     }
     catch (JsonException)
     {
-        return null;
+        return body;
     }
 }
 
