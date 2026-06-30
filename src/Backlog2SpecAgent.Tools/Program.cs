@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Backlog2SpecAgent.Tools.Comments;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,6 +45,7 @@ app.MapGet("/workitem/{id:int}", async (int id, IConfiguration config, IHttpClie
 
     using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
     var fields = doc.RootElement.GetProperty("fields");
+    var comments = await FetchCommentsAsync(http, org, project!, id);
 
     return Results.Ok(new
     {
@@ -51,12 +53,13 @@ app.MapGet("/workitem/{id:int}", async (int id, IConfiguration config, IHttpClie
         title              = GetField(fields, "System.Title"),
         workItemType       = GetField(fields, "System.WorkItemType"),
         description        = StripHtml(GetField(fields, "System.Description")),
-        acceptanceCriteria = StripHtml(GetField(fields, "Microsoft.VSTS.Common.AcceptanceCriteria"))
+        acceptanceCriteria = StripHtml(GetField(fields, "Microsoft.VSTS.Common.AcceptanceCriteria")),
+        comments
     });
 })
 .WithName("getWorkItem")
 .WithSummary("Get a single work item")
-.WithDescription("Fetches the title, description, acceptance criteria, and type of an Azure DevOps work item by ID.");
+.WithDescription("Fetches the title, description, acceptance criteria, type, and chronological developer comments of an Azure DevOps work item by ID.");
 
 // ── GET /workitem/{id}/hierarchy ────────────────────────────────────────────
 app.MapGet("/workitem/{id:int}/hierarchy", async (int id, IConfiguration config, IHttpClientFactory factory) =>
@@ -77,6 +80,7 @@ app.MapGet("/workitem/{id:int}/hierarchy", async (int id, IConfiguration config,
 
     using var parentDoc = JsonDocument.Parse(await parentResp.Content.ReadAsStringAsync());
     var parentFields = parentDoc.RootElement.GetProperty("fields");
+    var parentComments = await FetchCommentsAsync(http, org, project!, id);
 
     var parentDto = new
     {
@@ -84,7 +88,8 @@ app.MapGet("/workitem/{id:int}/hierarchy", async (int id, IConfiguration config,
         title              = GetField(parentFields, "System.Title"),
         workItemType       = GetField(parentFields, "System.WorkItemType"),
         description        = StripHtml(GetField(parentFields, "System.Description")),
-        acceptanceCriteria = StripHtml(GetField(parentFields, "Microsoft.VSTS.Common.AcceptanceCriteria"))
+        acceptanceCriteria = StripHtml(GetField(parentFields, "Microsoft.VSTS.Common.AcceptanceCriteria")),
+        comments           = parentComments
     };
 
     // 2. Extract child IDs from Hierarchy-Forward relations
@@ -121,13 +126,15 @@ app.MapGet("/workitem/{id:int}/hierarchy", async (int id, IConfiguration config,
                 {
                     var childId = child.TryGetProperty("id", out var cid) ? cid.GetInt32() : 0;
                     var childFields = child.GetProperty("fields");
+                    var childComments = await FetchCommentsAsync(http, org, project!, childId);
                     childrenDtos.Add(new
                     {
                         id = childId,
                         title              = GetField(childFields, "System.Title"),
                         workItemType       = GetField(childFields, "System.WorkItemType"),
                         description        = StripHtml(GetField(childFields, "System.Description")),
-                        acceptanceCriteria = StripHtml(GetField(childFields, "Microsoft.VSTS.Common.AcceptanceCriteria"))
+                        acceptanceCriteria = StripHtml(GetField(childFields, "Microsoft.VSTS.Common.AcceptanceCriteria")),
+                        comments           = childComments
                     });
                 }
             }
@@ -138,7 +145,7 @@ app.MapGet("/workitem/{id:int}/hierarchy", async (int id, IConfiguration config,
 })
 .WithName("getWorkItemHierarchy")
 .WithSummary("Get a work item with its children")
-.WithDescription("Fetches a parent work item (Feature or Epic) and all its direct child work items in one call.");
+.WithDescription("Fetches a parent work item (Feature or Epic) and all its direct child work items in one call, including chronological developer comments for the parent and each child.");
 
 // ── POST /repo-context ──────────────────────────────────────────────────────
 app.MapPost("/repo-context", async (RepoContextRequest req, IConfiguration config, IHttpClientFactory factory) =>
@@ -522,12 +529,18 @@ static string GetField(JsonElement fields, string key) =>
         ? v.GetString() ?? string.Empty
         : string.Empty;
 
-static string StripHtml(string html)
+static string StripHtml(string html) => CommentMapper.StripHtml(html);
+
+static async Task<List<WorkItemComment>> FetchCommentsAsync(HttpClient http, string org, string project, int id)
 {
-    if (string.IsNullOrWhiteSpace(html)) return string.Empty;
-    var text = Regex.Replace(html, "<[^>]+>", " ");
-    text = text.Replace("&nbsp;", " ").Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">");
-    return Regex.Replace(text, @"\s{2,}", " ").Trim();
+    var url = $"{org.TrimEnd('/')}/{project}/_apis/wit/workItems/{id}/comments?api-version=7.1-preview.4";
+    var resp = await http.GetAsync(url);
+    if (!resp.IsSuccessStatusCode) return [];
+
+    using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+    return doc.RootElement.TryGetProperty("comments", out var commentsArray)
+        ? CommentMapper.MapComments(commentsArray)
+        : [];
 }
 
 static IReadOnlyList<string> ExtractKeywords(string query)

@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Backlog2SpecAgent.Cli\Backlog2SpecAgent.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Backlog2SpecAgent.Tools\Backlog2SpecAgent.Tools.csproj" />
   </ItemGroup>
 
 </Project>
